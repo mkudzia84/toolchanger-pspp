@@ -212,15 +212,16 @@ if __name__ == "__main__":
             dll1.tail.append_node(ValueNode("Tail Appendix"))
         print('n : {val}'.format(val = n.value))
 
-    print("- iterate again")
+
+    print(" - delete test")
     for n in dll1:
         print('n : {val}'.format(val = n.value))
 
-    print(" - iterate using node : next")
-    for n in n3:
-        print('n : {val}'.format(val = n.value))
+    for n in dll1:
+        if n.value == 3:
+            dll1.remove_node(n)
 
-    print(" - iterate using node : prev")
-    for n in reversed(n3):
+    print("after delete of n == 3")
+    for n in dll1:
         print('n : {val}'.format(val = n.value))
     

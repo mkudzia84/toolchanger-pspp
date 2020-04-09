@@ -1,20 +1,7 @@
 
 import doublelinkedlist
 import conf
-import copy, math, time
-
-# GCODE strings
-class GCodeFormats:
-    G10_Temp = "G10 P{tool_id} S{active_temp} R{standby_temp}\n"   # Set Tool Active and Standby Temp
-    M98 = "M98 P\"{macro}\"\n"                                    # Run macro 
-    M104 = "M104 S{temp} T{tool_id}\n"                            # Set Extruder Temp
-    M106 = "M106 S{speed}\n"                                      # Set Fan On
-    M107 = "M107\n"                                               # Set Fan Off
-    M116 = "M116 P{tool_id} S5\n"                                 # Wait for Extruder Temp
-    M120 = "M120\n"                                               # Push position onto stack
-    M121 = "M121\n"                                               # Pop position from the stack
-    G10_Retract = "G10\n"                                         # G10 retract (Firmware)
-    G11 = "G11\n"                                                 # G11 unretract (Firmware)
+import copy, math, time                                           # G11 unretract (Firmware)
 
 # Parse exception
 class GCodeParseException(Exception):
@@ -95,9 +82,6 @@ class Params(Token):
             label = self.label,
             params = ','.join([str(p) for p in self.param]))
 
-# List of tokens gcodes to omit
-gcodes_omit = ['M104', 'M109', 'M900']
-
 # params formats 
 valid_params_format = {
     'TC_TEMP_INITIALIZE'    : [],
@@ -105,15 +89,6 @@ valid_params_format = {
     'AFTER_LAYER_CHANGE'    : [int, float],
     'TOOL_BLOCK_START'      : [int],
     'TOOL_BLOCK_END'        : [int]
-    }
-
-# Functions to fix the gcodes
-def fix_m106(token):
-    token.param['S'] = float(token.param['S']) / 255.0
-
-# gcode fixes
-gcodes_fix = {
-    'M106' : fix_m106
     }
 
 # GCode analyzer
@@ -396,24 +371,18 @@ class GCodeAnalyzer:
 
                     # Split into params
                     args = contents.split()
-
-                    # # Check if omit the code
                     gcode = args[0]
-                    if gcode in gcodes_omit:
-                        continue
+                    # # Check if omit the code
+                    if len(args) == 1:
+                        self.tokens.append_node(GCode(
+                            gcode = gcode,
+                            comment = comment))
                     else:
-                        if len(args) == 1:
-                            self.tokens.append_node(GCode(
-                                gcode = gcode,
-                                comment = comment))
-                        else:
-                            self.tokens.append_node(GCode(
-                                gcode = gcode,
-                                param = dict([(p[0], p[1:]) for p in args[1:]]),
-                                comment = comment))
-                        if gcode in gcodes_fix:
-                            gcodes_fix[gcode](self.tokens.tail)
-                        continue
+                        self.tokens.append_node(GCode(
+                            gcode = gcode,
+                            param = dict([(p[0], p[1:]) for p in args[1:]]),
+                            comment = comment))
+                    continue
 
                 # Check if Toolchange
                 if line[0] == 'T':
@@ -430,3 +399,58 @@ class GCodeAnalyzer:
                         prev_tool = previous_tool_head,
                         next_tool = current_tool_head))
                     continue
+
+
+# GCode validator
+# Used to fix the GCode coming out of Prusa
+class GCodeValidator:
+
+    gcodes_to_omit = ['M104', 'M109', 'M900']
+
+    # Init
+    def __init__(self):
+        pass
+
+    # analyze the gcode
+    def analyze_and_fix(self, gcode_analyzer):
+        
+        # found T
+        found_tool = False
+
+        # location of TC_INIT
+        first_layer_header = None
+
+        # Go over each token
+        for token in gcode_analyzer.tokens:
+
+            # gcodes to omit - delete
+            if token.type == Token.GCODE and token.gcode in GCodeValidator.gcodes_to_omit:
+                if conf.DEBUG:
+                    print("(DEBUG) GCodeValidator: Deleting {token}".format(token = str(token)))
+                gcode_analyzer.tokens.remove_node(token)
+                continue
+
+            # Token to fix 
+            if token.type == Token.GCODE and token.gcode == 'M106':
+                if conf.DEBUG:
+                    print("(DEBUG) GCodeValidator: Fixing M106 from 0..255 to 0-1.0 range")
+                token.param['S'] = float(token.param['S']) / 255.0
+                continue
+
+            # This is for case where file is using just one tool that is T0
+            # PS is assuming that default tool T0 is always enabled....
+            # 1) We need to record the location of first layer 
+            if token.type == Token.PARAMS and token.label == 'BEFORE_LAYER_CHANGE' and first_layer_header is None:
+                first_layer_header = token
+                continue
+
+            # 2) If found tool
+            if token.type == Token.TOOLCHANGE and token.next_tool != -1:
+                found_tool = True
+
+        # Inject the tool change to T0
+        if found_tool == False:
+            print("Warning! - GCodeValidator: Didn't found a tool change instruction, injecting T0 as a default tool...")
+            first_layer_header.append_node_left(ToolChange(-1, 0))
+    
+

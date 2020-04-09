@@ -115,5 +115,9 @@ def tool_temperature(layer_num, tool_id):
     else:
         return tool_temperature_layerN[tool_id]
 
+# Validate slic3r settings
+def validate_slc3r_config():
+    if int(os.environ['SLIC3R_USE_FIRMWARE_RETRACTION']) == 0:
+        raise ConfException("Slic3r is not configured to use Firmware retractions")
 
   
