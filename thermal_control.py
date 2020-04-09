@@ -3,6 +3,8 @@ import gcode_analyzer
 import tool_change_plan
 import doublelinkedlist
 
+import time
+
 from gcode_analyzer import Token, GCodeAnalyzer
 from tool_change_plan import ToolChangeInfo
 from conf import ConfException
@@ -69,7 +71,8 @@ class TemperatureController:
     # Analyze the layer information and generate 
     # the tool change sequence (layer independant)
     def analyze_gcode(self, gcode_analyzer):
-        
+        t_start = time.time()
+
         # Generates the list of tool_activations per tool
         if conf.DEBUG:
             print("(DEBUG) TempController: Generating tool activation sequence per tool...")
@@ -82,7 +85,7 @@ class TemperatureController:
         current_tool = None
 
         # Go over all of the tokens
-        for token in gcode_analyzer.analyze_runtime_estimates():
+        for token in gcode_analyzer.analyze_state():
             # Find the location of ;; TC_TEMP_INITIALIZE
             if token.type == Token.PARAMS and token.label == 'TC_TEMP_INITIALIZE':
                 self.temp_initialize_header = token
@@ -121,6 +124,10 @@ class TemperatureController:
 
         if self.temp_initialize_header is None:
             raise ConfException("TempController: Did not found TC_TEMP_INITIALIZE parameter in the GCode, slicer has not been configured correctly...")
+
+        t_end = time.time()
+        if conf.PERF_INFO:
+            print("TempController: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
 
     # Prep tool layer intialization
     def gcode_prep_header(self):

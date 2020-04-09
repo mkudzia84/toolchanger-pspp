@@ -4,7 +4,7 @@ import tool_change_plan
 import gcode_analyzer
 import doublelinkedlist
 import conf
-import copy, math
+import copy, math, time
 from collections import deque
 
 # Function to generate vertices for a circle 
@@ -409,10 +409,12 @@ class PrimeTower:
     def analyze_gcode(self, gcode_analyzer):
         self.layers = [PrimeTowerLayerInfo(prime_tower = self)]
 
+        t_start = time.time()
+
         # Active tool
         current_tool = None            # Tool Change Info
         layer_info = self.layers[-1]   # Layer Info
-        for token in gcode_analyzer.analyze():
+        for token in gcode_analyzer.analyze_state():
             # Check if AFTER_LAYER_CHANGE label
             if token.type == Token.PARAMS and token.label == 'AFTER_LAYER_CHANGE':
                 current_layer, current_layer_z = token.param[0], token.param[1]
@@ -460,7 +462,7 @@ class PrimeTower:
 
             # Check if Tool change
             if token.type == Token.TOOLCHANGE:
-                if token.state_post.tool_selected != None:
+                if token.next_tool != -1:
                     current_tool = ToolChangeInfo(tool_change = token)
                     if conf.DEBUG:
                         print("(DEBUG) PrimeTower - Added tool T{tool_id} to layer #{layer_num}".format(tool_id = token.next_tool, layer_num = self.layers[-1].layer_num))
@@ -495,6 +497,10 @@ class PrimeTower:
         # Calc band and brim info
         self.pillar_brims_generate()
         self.pillar_bands_generate()
+
+        t_end = time.time()
+        if conf.PERF_INFO:
+            print("PrimeTower: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
 
         return True
 
@@ -536,7 +542,7 @@ class PrimeTower:
                             min = min_layer_height, 
                             max = max_layer_height,
                             tools = ','.join([str(tool) for tool in optimized_active_tools])))
-                    print("PrimeTower - Prime tower layer #{layer_num} can be combined with previous layer, squashing...".format(layer_num = layer_info.layer_num))
+                        print("(DEBUG) Prime tower layer #{layer_num} can be combined with previous layer, squashing...".format(layer_num = layer_info.layer_num))
 
                     # Update the old layer
                     optimized_layers[optimized_layer_indx].tool_change_seq += layer_info.tool_change_seq

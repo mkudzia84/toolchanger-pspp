@@ -1,7 +1,7 @@
 
 import doublelinkedlist
 import conf
-import copy, math
+import copy, math, time
 
 # GCODE strings
 class GCodeFormats:
@@ -127,24 +127,45 @@ class GCodeAnalyzer:
         RETRACTED = 2
 
         # Constructor
-        def __init__(self):
-            self.x = None
-            self.y = None
-            self.z = None
-            self.layer_num = None
-            self.feed_rate = None
-            self.tool_selected = None
-            self.tool_extrusion = {}
-            self.retracted = GCodeAnalyzer.State.UNRETRACTED
-            # Tweak so it picks up values from Conf
-            self.x_movement_absolute = True
-            self.y_movement_absolute = True
-            self.z_movement_absolute = True
-            self.e_relative = True  
+        def __init__(self, 
+                     x = None, 
+                     y = None, 
+                     z = None, 
+                     layer_num = None, 
+                     feed_rate = None, 
+                     tool_selected = None, 
+                     tool_extrusion = None, 
+                     retracted = None, 
+                     e_relative = True):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.layer_num = layer_num
+            self.feed_rate = feed_rate
+            self.tool_selected = tool_selected
+            if tool_extrusion is None:
+                self.tool_extrusion = {}
+            else:
+                self.tool_extrusion = tool_extrusion
+            if retracted is None:
+                self.retracted = GCodeAnalyzer.State.UNRETRACTED
+            else:
+                self.retracted = retracted
+            self.e_relative = e_relative
 
         # Copy
-        def clone(self):
-            return copy.deepcopy(self)
+        def copy(self):
+            lhs = GCodeAnalyzer.State(
+                x = self.x,
+                y = self.y,
+                z = self.z,
+                layer_num = self.layer_num,
+                feed_rate = self.feed_rate,
+                tool_selected = self.tool_selected,
+                tool_extrusion = self.tool_extrusion.copy(),
+                retracted = self.retracted,
+                e_relative = self.e_relative)
+            return lhs
 
         # Get the move speed
         @property
@@ -197,16 +218,21 @@ class GCodeAnalyzer:
             self.parse(gcode_file)
         self.total_runtime = 0
 
+        # cached list
+        self.cached_tokens = []
+        
     # Analyze the tokens - from beggining to end
-    # Yields the current token
     # State is after GCode execution
     # - also calculates the runtimes
-    def analyze(self):
+    def analyze_state(self):
         # State stack - to handle M120 and M121
         # For normal operation - replace the item on on top of the queue
         # for M120 and M121 push and pop copy of the last item onto the stack
         state_stack = [GCodeAnalyzer.State()]
         seq = 0
+
+        # Total runtime of GCode
+        self.total_runtime = 0.0
 
         for token in self.tokens:
             token.seq = seq
@@ -214,9 +240,9 @@ class GCodeAnalyzer:
 
             # Accumulate the state - replace the top one with the copy
             token.state_pre = state_stack[-1]
-            state_stack[-1] = state_stack[-1].clone()
+            state_stack[-1] = state_stack[-1].copy()
             token.state_post = state_stack[-1]
-            
+
             # Tool change token
             if token.type == Token.TOOLCHANGE:
                 if token.next_tool == -1:
@@ -227,77 +253,73 @@ class GCodeAnalyzer:
                     # Basically first time the tool is used
                     if token.next_tool not in token.state_post.tool_extrusion:
                         token.state_post.tool_extrusion[token.next_tool] = 0.0
-
+                token.runtime = conf.runtime_tool_change
             # GCode 
-            if token.type == Token.GCODE:
+            elif token.type == Token.GCODE:
                 # Add retraction
                 if token.gcode == 'G10': # Firmware retract
                     token.state_post.retracted = GCodeAnalyzer.State.RETRACTED
+                    token.runtime = conf.runtime_default
                 elif token.gcode == 'G11': # Firmware unretract
                     token.state_post.retracted = GCodeAnalyzer.State.UNRETRACTED
+                    token.runtime = conf.runtime_default
                 elif token.gcode == 'G1': # Controlled move
+
+                    # Move times
+                    token.runtime = 0
                     # TODO: For time being just treat X/Y/Z absolute
-                    if 'X' in token.param: token.state_post.x = float(token.param['X'])
-                    if 'Y' in token.param: token.state_post.y = float(token.param['Y'])
-                    if 'Z' in token.param: token.state_post.z = float(token.param['Z'])
+                    state_pre = token.state_pre
+                    state_post = token.state_post
+
+                    if 'F' in token.param: state_post.feed_rate = float(token.param['F'])
+                    if 'X' in token.param: 
+                        state_post.x = float(token.param['X'])
+                        x0 = state_pre.x if state_pre.x != None else 0.0
+                        x_time = abs(state_post.x - x0) * 120.0 / (state_pre.move_speed_x + state_post.move_speed_x)
+                        if x_time > token.runtime: token.runtime = x_time
+                    if 'Y' in token.param: 
+                        state_post.y = float(token.param['Y'])
+                        y0 = state_pre.y if state_pre.y != None else 0.0
+                        y_time = abs(state_post.y - y0) * 120.0 / (state_pre.move_speed_y + state_post.move_speed_y)
+                        if y_time > token.runtime: token.runtime = y_time
+                    if 'Z' in token.param: 
+                        state_post.z = float(token.param['Z'])
+                        z0 = state_pre.z if state_pre.z != None else 0.0
+                        z_time = abs(state_post.z - z0) * 120.0 / (state_pre.move_speed_z + state_post.move_speed_z)
+                        if z_time > token.runtime: token.runtime = z_time
                     if 'E' in token.param:
-                        if token.state_pre.e_relative:
-                            token.state_post.tool_extrusion[token.state_post.tool_selected] += float(token.param['E'])
+                        tool_id = state_pre.tool_selected
+                        if state_pre.e_relative:
+                            state_post.tool_extrusion[tool_id] += float(token.param['E'])
                         else: 
-                            token.state_post.tool_extrusion[token.state_post.tool_selected] = float(token.param['E'])
-                    if 'F' in token.param: token.state_post.feed_rate = float(token.param['F'])
+                            state_post.tool_extrusion[tool_id] = float(token.param['E'])
+                        e0 = state_pre.tool_extrusion[tool_id]
+                        e1 = state_post.tool_extrusion[tool_id]
+                        e_time = abs(e1 - e0) * 120.0 / (state_pre.extrud_speed + state_post.extrud_speed)
+                        if e_time > token.runtime: token.runtime = e_time
+
                 elif token.gcode == 'M120': # Push state onto stack
                     # Push the copy of the current state onto the stack - experimental
-                    state_stack.append(state_stack[-1].clone())
+                    state_stack.append(state_stack[-1].copy())
+                    token.runtime = 0.0
                 elif token.gcode == 'M121': # Pop state from the stack 
                     # Pop the copy of the current state from the stack - experimental
                     state_stack.pop()
+                    token.runtime = 0.0
 
             # PARAM
-            if token.type == Token.PARAMS:
+            elif token.type == Token.PARAMS:
                 # Track layer changes
                 if token.label == 'AFTER_LAYER_CHANGE':
                     token.state_post.layer_num = token.param[0]
-
-            # Yield result
-            yield token
-        # end for
-
-    # Build runtime estimates
-    def analyze_runtime_estimates(self):
-        self.total_runtime = 0.0
-
-        for token in self.analyze():
-            # Tool change - set fixed runtime
-            if token.type == Token.TOOLCHANGE:
-                token.runtime = conf.runtime_tool_change
-            elif token.type == Token.GCODE and token.gcode == 'G1':
-                # Calculate the runtime based on the move
-                s2 = token.state_post
-                s1 = token.state_pre
-                x2 = s2.x if s2.x != None else 0.0
-                x1 = s1.x if s1.x != None else 0.0
-                y2 = s2.y if s2.y != None else 0.0
-                y1 = s1.y if s1.y != None else 0.0
-                z2 = s2.z if s2.z != None else 0.0
-                z1 = s1.z if s1.z != None else 0.0
-                x_time = abs(x2 - x1) * 120.0 / (s1.move_speed_x + s2.move_speed_x)
-                y_time = abs(y2 - y1) * 120.0 / (s1.move_speed_y + s2.move_speed_y)
-                z_time = abs(z2 - z1) * 120.0 / (s1.move_speed_z + s2.move_speed_z)
-                move_times = [x_time, y_time, z_time]
-                if s2.tool_selected is not None:
-                    e_time = abs(s2.e - s1.e) * 120.0 / (s1.extrud_speed + s2.extrud_speed)
-                    move_times.append(e_time)
-                token.runtime = round(max(move_times), 2)
-
-            elif token.type in [Token.COMMENT, Token.PARAMS]:
                 token.runtime = 0
             else:
                 token.runtime = conf.runtime_default
 
-            yield token
-            # Add total runtime
+            # Add the total runtime
             self.total_runtime += token.runtime
+
+        return self.tokens
 
     # Print total runtime
     def print_total_runtime(self):
@@ -408,4 +430,3 @@ class GCodeAnalyzer:
                         prev_tool = previous_tool_head,
                         next_tool = current_tool_head))
                     continue
-

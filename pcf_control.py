@@ -2,6 +2,7 @@ import conf
 import gcode_analyzer
 import tool_change_plan
 import doublelinkedlist
+import time
 
 from gcode_analyzer import Token, GCodeAnalyzer
 from tool_change_plan import ToolChangeException
@@ -16,7 +17,8 @@ class PartCoolingFanController:
     # Analyze the GCode 
     # the tool change sequence (layer independant)
     def analyze_gcode(self, gcode_analyzer):
-        
+        t_start = time.time()
+
         # Generates the list of tool_activations per tool
         if conf.DEBUG:
             print("(DEBUG) PartFanController: Generating tool activation sequence per tool...")
@@ -25,13 +27,17 @@ class PartCoolingFanController:
         current_tool = None
 
         # Go over all of the tokens
-        for token in gcode_analyzer.analyze():
+        for token in gcode_analyzer.tokens:
             # Setup the tool changes
             if token.type == Token.TOOLCHANGE:
                 if token.state_post.tool_selected != None:
                     current_tool = token
                     self.tool_change_seq.append(current_tool)
                 continue
+
+        t_end = time.time()
+        if conf.PERF_INFO:
+            print("PCF-Controller: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
     
     # Inject the GCode
     def inject_gcode(self):

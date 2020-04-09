@@ -56,7 +56,7 @@ def main():
 
     print("-----------------------------------------")
     print(" TC-PSPP : Writing modified file...      ")
-    with open(filename + '.mod.gcode', mode='w', encoding='utf8') as gcode_out:
+    with open(os.path.splittext(filename)[0] + '-processed.gcode', mode='w', encoding='utf8') as gcode_out:
         for token in gcode.tokens:
             gcode_out.write(str(token) + '\n')
 

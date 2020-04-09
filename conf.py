@@ -7,6 +7,7 @@ class ConfException(Exception):
 
 
 DEBUG = False
+PERF_INFO = True
 GCODE_VERBOSE = True
 
 # Imported from Slic3r
