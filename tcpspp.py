@@ -58,16 +58,30 @@ def main():
 
     gcode.print_total_runtime()
 
+    # Run validation
+    print("Validating...")
+    if validator.analyze_retracts(gcode):
+        print("[Ok] Retract/unretract sequence")
+    else:
+        print("[Error] Retract/unretract sequence")
+
     print("-----------------------------------------")
     print(" TC-PSPP : Writing modified file...      ")
-    with open(filename + '-processed.gcode', mode='w', encoding='utf8') as gcode_out:
+    filename_out = filename[0:filename.rfind('.gcode')] + '_' + gcode.total_runtime_str + '.gcode'
+    print(" Writing to {filename}".format(filename = filename_out))
+
+    with open(filename_out, mode='w', encoding='utf8') as gcode_out:
         for token in gcode.tokens:
             gcode_out.write(str(token) + '\n')
+
+    #if conf.DEBUG == False:
+    #    print(" Removing old file {filename}".format(filename = filename))
+    #    os.remove(filename)
 
     t_end = time.time()
     print("TC-PSPP: Done... [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
 
-    time.sleep(5)
+    time.sleep(20)
 
 # Main entry point
 if __name__ == "__main__":
@@ -79,6 +93,7 @@ if __name__ == "__main__":
         print(conf_err.message)
         time.sleep(60)
         quit()
+
 
 
 

@@ -66,7 +66,8 @@ class TemperatureController:
 
     def __init__(self):
         self.tool_activation_seq = {}
-        self.temp_initialize_header = None
+        self.temp_header = None
+        self.temp_footer = None
 
     # Analyze the layer information and generate 
     # the tool change sequence (layer independant)
@@ -88,7 +89,11 @@ class TemperatureController:
         for token in gcode_analyzer.analyze_state():
             # Find the location of ;; TC_TEMP_INITIALIZE
             if token.type == Token.PARAMS and token.label == 'TC_TEMP_INITIALIZE':
-                self.temp_initialize_header = token
+                self.temp_header = token
+
+            # Find the location of ;; TC_TEMP_SHUTDOWN
+            if token.type == Token.PARAMS and token.label == 'TC_TEMP_SHUTDOWN':
+                self.temp_footer = token
 
             # Remove the existing tokens for temp managment
             if token.type == Token.GCODE and token.gcode == 'M109':
@@ -122,8 +127,10 @@ class TemperatureController:
                     current_tool.block_end = token
                 continue
 
-        if self.temp_initialize_header is None:
+        if self.temp_header is None:
             raise ConfException("TempController: Did not found TC_TEMP_INITIALIZE parameter in the GCode, slicer has not been configured correctly...")
+        if self.temp_footer is None:
+            raise ConfException("TempController: Did not found TC_TEMP_SHUTDOWN parameter in the GCode, slicer has not been configured correctly...")
 
         t_end = time.time()
         if conf.PERF_INFO:
@@ -140,7 +147,7 @@ class TemperatureController:
             tool_info = activation_seq[0]
 
             time_delta = 0.0
-            token = self.temp_initialize_header.next
+            token = self.temp_header.next
             while token != tool_info.tool_change:
                 time_delta += token.runtime
                 token = token.next
@@ -184,8 +191,8 @@ class TemperatureController:
                 gcode_wait.append_node(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
         # Inject the gcode at TC_INIT
-        self.temp_initialize_header.append_nodes_right(gcode_wait)
-        self.temp_initialize_header.append_nodes_right(gcode_init)
+        self.temp_header.append_nodes_right(gcode_wait)
+        self.temp_header.append_nodes_right(gcode_init)
         
     # Prep tool activation/deactivation/idling gcode
     def gcode_prep_toolchange(self):
@@ -279,6 +286,10 @@ class TemperatureController:
                     tool = tool_id, layer = tool_info.block_end.state_post.layer_num))
 
                 tool_info.block_end.append_node(gcode_analyzer.GCode('M104', {'S' : 0, 'T' : tool_id}))
+
+        # Insert deactivation at the end
+        self.temp_footer.append_node(gcode_analyzer.GCode('M104', {'S' : 0}))
+        self.temp_footer.append_node(gcode_analyzer.GCode('M140', {'S' : 0}))
 
     # Inject the GCode
     def inject_gcode(self):

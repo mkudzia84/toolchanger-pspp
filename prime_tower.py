@@ -68,35 +68,17 @@ class PrimeTowerLayerInfo(LayerInfo):
             tokens.append_node(gcode_analyzer.GCode('G1', {'X' : vertices[0][0], 'Y' : vertices[0][1], 'E' : E}))
 
         return tokens
-    
-    # Create gcode for brim for specific tool
-    def gcode_pillar_brim(self, tool_id):
-        brim_gcode = doublelinkedlist.DLList()
-
-        # Brint the brim radius
-        for circle in self.prime_tower.brim_radiuses[tool_id]:
-            circle_vertices = circle_generate_vertices(conf.prime_tower_x, conf.prime_tower_y, circle.radius, conf.prime_tower_band_num_faces)
- 
-            brim_gcode.append_nodes(self.gcode_print_shape(circle_vertices, tool_id))
-            retract = False
-
-        if conf.GCODE_VERBOSE:
-            brim_gcode.head.comment = "TC-PSPP - T{tool} - Brim - Start".format(tool = tool_id)
-            brim_gcode.tail.comment = "TC-PSPP - T{tool} - Brim - End".format(tool = tool_id)
-        
-        return brim_gcode
 
     # Create gcode for band for specific tool
     def gcode_pillar_band(self, tool_id):
         band_gcode = doublelinkedlist.DLList()
 
-        for circle in self.prime_tower.band_radiuses[tool_id]:
+        for radius in self.prime_tower.get_pillar_bands(self.layer_num, tool_id):
             # Start each circle at a different point to avoid weakening the tower
-            circle_vertices = deque(circle_generate_vertices(conf.prime_tower_x, conf.prime_tower_y, circle.radius, conf.prime_tower_band_num_faces))
+            circle_vertices = deque(circle_generate_vertices(conf.prime_tower_x, conf.prime_tower_y, radius, conf.prime_tower_band_num_faces))
             circle_vertices.rotate(self.layer_num)
 
             band_gcode.append_nodes(self.gcode_print_shape(circle_vertices, tool_id))
-            retract = False
 
         if conf.GCODE_VERBOSE:
             band_gcode.head.comment = "TC-PSPP - T{tool} - Pillar - Start".format(tool = tool_id)
@@ -105,43 +87,20 @@ class PrimeTowerLayerInfo(LayerInfo):
         return band_gcode
 
     # Generate gcode for pillar bands for IDLE tools
-    def gcode_pillar_idle_tool_bands(self, tool_id):
-        circle_bands = [] # tuples (first, last)
-        for tool in self.tools_idle:
-            circle_bands.append((self.prime_tower.band_radiuses[tool][0], self.prime_tower.band_radiuses[tool][-1]))
-        # Combine the circle bands
-        circle_bands_optimized = []
-        
-        i = 0
-        for i in range(0, len(circle_bands)):
-            c1, c2 = circle_bands[i][0], circle_bands[i][1]
-            
-            for j in range(i+1, len(circle_bands)):
-                # Merge two
-                if circle_bands[j][0].band_number == c2.band_number + 1:
-                    c2 = circle_bands[j][1]
-                else:
-                    i = j
-                    if conf.DEBUG:
-                        print("(DEBUG) PrimeTower: Merged IDLE tool bands onto ({r1}, {r2}) on layer #{layer}".format(r1 = c1.radius, r2 = c2.radius, layer = self.layer_num))
-            circle_bands_optimized.append((c1, c2))
-                    
+    def gcode_pillar_idle_tool_bands(self, tool_id): 
         # Generate vertices
         tokens = doublelinkedlist.DLList()
 
-        is_first_band = True
-        for band in circle_bands_optimized:
-            vertices = zigzag_generate_vertices(conf.prime_tower_x, conf.prime_tower_y, band[0].radius, band[1].radius, conf.prime_tower_band_num_faces)
-            gcode_shape = self.gcode_print_shape(vertices, tool_id)
-            
-            # Add retraction and detractions between the bands
-            if is_first_band == False:
-                gcode_shape.head.append_node_left(gcode_analyzer.GCode('G10'))
-                gcode_shape.head.append_node(gcode_analyzer.GCode('G11'))
+        for idle_tool_id in self.tools_idle:
+            gcode_band = doublelinkedlist.DLList()
+            for radius in self.prime_tower.get_pillar_bands(self.layer_num, idle_tool_id):
+                vertices = circle_generate_vertices(conf.prime_tower_x, conf.prime_tower_y, radius, conf.prime_tower_band_num_faces)
+                gcode_band.append_nodes(self.gcode_print_shape(vertices, tool_id))
+                        
+            gcode_band.head.append_node(gcode_analyzer.GCode('G11'))
+            gcode_band.head.append_node_left(gcode_analyzer.GCode('G10'))
 
-            tokens.append_nodes(gcode_shape)
-
-            is_first_band = False
+            tokens.append_nodes(gcode_band)
 
         if conf.GCODE_VERBOSE:
             tokens.head.comment = "TC-PSPP - Prime tower idle tool infill for layer #{layer} - start".format(layer = self.layer_num)
@@ -160,43 +119,51 @@ class PrimeTowerLayerInfo(LayerInfo):
             gcode.head.append_node(gcode_analyzer.GCode('G1', { 'Z' : self.layer_z} ))
 
         # - if was unretracted - add retraction/unretraction around the first move from gcode
-        if inject_point.state_post.retracted == gcode_analyzer.GCodeAnalyzer.State.UNRETRACTED:
-            gcode.head.append_node_left(gcode_analyzer.GCode('G10'))
-            gcode.head.append_node(gcode_analyzer.GCode('G11'))
+        if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.UNRETRACTED:
+            gcode.head.append_node(gcode_analyzer.GCode('G11', comment = 'move-in detract'))
+            gcode.head.append_node_left(gcode_analyzer.GCode('G10', comment = 'move-in retract' ))
         
         # - if was retracted, just add unretraction after first move from gcode
-        if inject_point.state_post.retracted == gcode_analyzer.GCodeAnalyzer.State.RETRACTED:
-            gcode.head.append_node(gcode_analyzer.GCode('G11'))
+        if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.RETRACTED:
+            gcode.head.append_node(gcode_analyzer.GCode('G11', comment = 'move-in detract'))
         gcode.head.append_node_left(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
 
         return gcode
 
     # Inject move out of prime tower
     def inject_prime_tower_move_out(self, inject_point, gcode):
-        # - if  tool was retracted before entry point - retract
-        if inject_point.state_post.retracted == gcode_analyzer.GCodeAnalyzer.State.RETRACTED:
-            gcode.append_node(gcode_analyzer.GCode('G10'))
-
         # - if prime tower is higher then inject point Z, move XY first and then Z
         # - if prime tower is lower then inject point Z, move Z first and then XY
         if inject_point.state_post.z is None:
             raise PrimeTowerException("Malformed GCode - injecting prime tower move-out code where Z is not set")
 
-        # To handle the situation where state is not set initially
-        # no need to do move back
-        if inject_point.state_post.x != None and inject_point.state_post.y != None:
-            gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
-            if inject_point.state_post.z < self.layer_z:
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_point.state_post.z }))
-            elif inject_point.state_post.z > self.layer_z:
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_point.state_post.z }))
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
+        # No need to move out in 
+        # -To handle the situation where state is not set initially
+        # - Inject point is BEFORE_LAYER_END
+        # 
+        if inject_point.type != Token.PARAMS or inject_point.label != 'BEFORE_LAYER_CHANGE':
+            gcode.append_node(gcode_analyzer.GCode('G10', comment = 'move-out retract'))
+            if inject_point.state_post.x != None and inject_point.state_post.y != None:
+                gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
+                if inject_point.state_post.z < self.layer_z:
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_point.state_post.z }))
+                elif inject_point.state_post.z > self.layer_z:
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_point.state_post.z }))
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
+                else:
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
+                gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : inject_point.state_post.feed_rate}))
             else:
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
-            gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : inject_point.state_post.feed_rate}))
+                print("Warning : X/Y position state not present, if this error apears more then once the GCode is malformed")
+
+            # Retract before 
+            # - if  tool was unretracted before entry point - unretract after the move
+            if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.UNRETRACTED:
+                gcode.append_node(gcode_analyzer.GCode('G11', comment = 'move-out detract'))
         else:
-            print("Warning : X/Y position state not present, if this error apears more then once the GCode is malformed")
+            if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.RETRACTED:
+                gcode.append_node(gcode_analyzer.GCode('G10', comment = 'move-out retract'))
 
         return gcode
 
@@ -205,121 +172,62 @@ class PrimeTowerLayerInfo(LayerInfo):
         
         filled_idle_gaps = False
 
-        # Inject bands and brim for active tools
-        if self.layer_num == 0:
-            tool_indx = 0
-            for tool_change in self.tools_sequence:                
-                inject_point = None
+        # Check if we need to continue constructing the tower
+        if len(self.tools_active) == 1 and len(self.tools_idle) == 0:
+            if conf.DEBUG:
+                print("(DEBUG) One tool ACTIVE and no more IDLE tools - can stop generating prime tower")
+            return 
 
-                # This is done becuase Prusa Slicer injects first tool activation before entering first layer
-                if tool_indx == 0:
-                    # Case if the the tool is in sequence later on after squishing - don't need to deprime
-                    # as this tool will be primed again
-                    if tool_indx in self.tools_sequence[1:]:
-                        continue
+        tool_indx = 0
+        for tool_change in self.tools_sequence:
+            inject_point = None
 
-                    inject_point = self.layer_start
-                else:
-                    inject_point = tool_change.block_start
+            if tool_indx == 0 and self.layer_num == 0:
+                inject_point = self.layer_start
+            elif tool_indx == 0 and len(self.tool_change_seq) == 0:
+                inject_point = self.layer_end
+            elif tool_indx == 0 and len(self.tools_sequence) > 0:
+                # de-prime (fill the gap) - prefered because we use same filament
+                inject_point = tool_change.block_end
+            else:
+                inject_point = tool_change.block_start
 
-                # Generate BRIM and BAND
-                gcode_brim = self.gcode_pillar_brim(tool_id = tool_change.tool_id)
+            # Not gonna happen - because we will cut off earlier but
+            if inject_point is None:
+                raise PrimeTowerException("Inject-Point is None...")
+
+            # Generate BAND
+            gcode_band = self.gcode_pillar_band(tool_id = tool_change.tool_id)
+            if conf.DEBUG:
+                print("(DEBUG) Generated prime tower band for layer #{layer_num} for T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
+
+            gcode_idle = None
+            if not filled_idle_gaps and len(self.tools_idle) != 0:
+                gcode_idle = self.gcode_pillar_idle_tool_bands(tool_change.tool_id)
+                filled_idle_gaps = True
                 if conf.DEBUG:
-                    print("(DEBUG) Generated prime tower brim for layer #0 for T{tool}".format(tool = tool_change.tool_id))
-      
-                gcode_band = self.gcode_pillar_band(tool_id = tool_change.tool_id)
-                if conf.DEBUG:
-                    print("(DEBUG) Generated prime tower band for layer #0 for T{tool}".format(tool = tool_change.tool_id))
-      
-                # Add retract and detract between the two
-                gcode_brim.tail.append_node(gcode_analyzer.GCode('G10'))   
-                gcode_band.head.append_node(gcode_analyzer.GCode('G11'))
-                    
-                gcode_idle = None
-                if not filled_idle_gaps and len(self.tools_idle) != 0:
-                    gcode_idle = self.gcode_pillar_idle_tool_bands(tool_change.tool_id)
-                    filled_idle_gaps = True
-                    if conf.DEBUG:
-                        print("(DEBUG) Generated prime tower idle tools infill for layer #0 with T{tool}".format(tool = tool_change.tool_id))
-                # GCode idle already has G11 and G10s
+                    print("(DEBUG) Generated prime tower idle tools infill for layer #{layer_num} with T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
+
+            # Finally inject 
+            gcode = gcode_band
+
+            # 1) Move to Z of Prime Tower layer 
+            # 2) Check if the tool has been already retracted, if not don't retract again
+            gcode = self.inject_prime_tower_move_in(inject_point, gcode) 
                 
-                # Finally inject 
-                gcode = gcode_brim
+            # 3) Add the idle tools
+            if gcode_idle is not None:
+                gcode.append_nodes(gcode_idle)
 
-                # 1) Move to Z of Prime Tower layer 
-                # 2) Check if the tool has been already retracted, if not don't retract again
-                gcode = self.inject_prime_tower_move_in(inject_point, gcode) 
-                
-                # 3) Add the band and idle tools
-                gcode.append_nodes(gcode_band)
-                if gcode_idle is not None:
-                    gcode.append_nodes(gcode_idle)
+            # 4) If was retracted - retract
+            # 5) Go back to the previous position
+            gcode = self.inject_prime_tower_move_out(inject_point, gcode)
 
-                # 4) If was retracted - retract
-                # 5) Go back to the previous position
-                gcode = self.inject_prime_tower_move_out(inject_point, gcode)
-                
-                inject_point.append_nodes_right(gcode)
-                if conf.DEBUG:
-                    print("(DEBUG) Generated prime tower band for layer #0 for T{tool}".format(tool = tool_change.tool_id))
+            inject_point.append_nodes_right(gcode)
+            if conf.DEBUG:
+                print("(DEBUG) Generated prime tower band for layer #{layer} for T{tool}".format(layer = self.layer_num, tool = tool_change.tool_id))
 
-                tool_indx += 1
-        else:
-
-            # Check if we need to continue constructing the tower
-            if len(self.tools_active) == 1 and len(self.tools_idle) == 0:
-                if conf.DEBUG:
-                    print("(DEBUG) One tool ACTIVE and no more IDLE tools - can stop generating prime tower")
-                return 
-
-            tool_indx = 0
-            for tool_change in self.tools_sequence:
-                inject_point = None
-
-                if tool_indx == 0 and len(self.tool_change_seq) == 0:
-                    inject_point = self.layer_end
-                elif tool_indx == 0 and len(self.tools_sequence) > 0:
-                    # de-prime (fill the gap) - prefered because we use same filament
-                    inject_point = tool_change.block_end
-                else:
-                    inject_point = tool_change.block_start
-
-                # Not gonna happen - because we will cut off earlier but
-                if inject_point is None:
-                    raise PrimeTowerException("Inject-Point is None...")
-
-               # Generate BAND
-                gcode_band = self.gcode_pillar_band(tool_id = tool_change.tool_id)
-                if conf.DEBUG:
-                    print("(DEBUG) Generated prime tower band for layer #{layer_num} for T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
-
-                gcode_idle = None
-                if not filled_idle_gaps and len(self.tools_idle) != 0:
-                    gcode_idle = self.gcode_pillar_idle_tool_bands(tool_change.tool_id)
-                    filled_idle_gaps = True
-                    if conf.DEBUG:
-                        print("(DEBUG) Generated prime tower idle tools infill for layer #{layer_num} with T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
-
-                # Finally inject 
-                gcode = gcode_band
-
-                # 1) Move to Z of Prime Tower layer 
-                # 2) Check if the tool has been already retracted, if not don't retract again
-                gcode = self.inject_prime_tower_move_in(inject_point, gcode) 
-                
-                # 3) Add the idle tools
-                if gcode_idle is not None:
-                    gcode.append_nodes(gcode_idle)
-
-                # 4) If was retracted - retract
-                # 5) Go back to the previous position
-                gcode = self.inject_prime_tower_move_out(inject_point, gcode)
-
-                inject_point.append_nodes_right(gcode)
-                if conf.DEBUG:
-                    print("(DEBUG) Generated prime tower band for layer #{layer} for T{tool}".format(layer = self.layer_num, tool = tool_change.tool_id))
-
-                tool_indx += 1
+            tool_indx += 1
 
 ###########################################################################################################
 # Prime Tower 
@@ -329,46 +237,47 @@ class PrimeTower:
     def __init__(self, layers = None):
         if layers is not None:
             self.generate_layers(layers)
+       
+    # Generate bands for a layer/tool
+    def generate_pillar_bands(self):
+        self.band_radiuses = {} 
+        self.brim_radiuses = {}
 
-    # Tool prime tower radiuses
-    class CircleOutline:
-        def __init__(self, radius, band_number):
-            self.radius = radius
-            self.band_number = band_number
+        # Enabled tools - in sequence
+        layer0_tools = [tool.tool_id for tool in self.layers[0].tools_sequence] + sorted(self.layers[0].tools_idle)
 
-    # Calculate pillar bands for each tool
-    def pillar_bands_generate(self):
-        self.band_radiuses = {} # tuples (radius, band_number)
-        enabled_tools = self.layers[0].tools_active | self.layers[0].tools_idle
-
+        # - BRIM
         current_r = conf.prime_tower_r
-        band_number = 0
-        for tool in sorted(enabled_tools):
-            tool_band_radiuses = [0.0] * conf.prime_tower_band_width
-            for indx in range(0, conf.prime_tower_band_width):
-                current_r -= conf.tool_nozzle_diameter[tool] / 2.0
-                tool_band_radiuses[indx] = PrimeTower.CircleOutline(current_r, band_number)
-                current_r -= conf.tool_nozzle_diameter[tool] / 2.0
-                band_number += 1
-            
-            self.band_radiuses[tool] = tool_band_radiuses
+        for tool in layer0_tools:
+            self.brim_radiuses[tool] = []
 
-    # Calculate pillar brims for each tool
-    def pillar_brims_generate(self):
-        self.brim_radiuses = {} # tuples (radius, band_number)
-
-        current_r = conf.prime_tower_r
-        band_number = 0
-        for tool in [tool_change.tool_id for tool_change in self.layers[0].tool_change_seq]:
-            tool_brim_radiuses = [0.0] * conf.brim_width
             for indx in range(0, conf.brim_width):
                 current_r += conf.tool_nozzle_diameter[tool] / 2.0
-                tool_brim_radiuses[indx] = PrimeTower.CircleOutline(current_r, band_number)
+                self.brim_radiuses[tool].append(current_r)
                 current_r += conf.tool_nozzle_diameter[tool] / 2.0
-                band_number += 1
-           
-            self.brim_radiuses[tool] = tool_brim_radiuses
-        
+        current_r = conf.prime_tower_r
+        while current_r > 1.5 * conf.tool_nozzle_diameter[0]:
+            current_r -= conf.tool_nozzle_diameter[0] / 2.0
+            self.brim_radiuses[tool].insert(0, current_r)
+            current_r -= conf.tool_nozzle_diameter[0] / 2.0
+
+        # - BAND
+        current_r = conf.prime_tower_r
+        for tool in layer0_tools:
+            self.band_radiuses[tool] = []
+
+            for indx in range(0, conf.prime_tower_band_width):
+                current_r += conf.tool_nozzle_diameter[tool] / 2.0
+                self.band_radiuses[tool].append(current_r)
+                current_r += conf.tool_nozzle_diameter[tool] / 2.0
+
+    # Get the bands for specific layer
+    def get_pillar_bands(self, layer_num, tool_id):
+        if layer_num < conf.brim_height:
+            return self.brim_radiuses[tool_id]
+        else:
+            return self.band_radiuses[tool_id]
+
     # Analyze the tool status
     def analyze_tool_status(self):
         current_tool = None
@@ -445,7 +354,7 @@ class PrimeTower:
             if token.type == Token.PARAMS and token.label == 'BEFORE_LAYER_CHANGE':
                 next_layer, next_layer_z = token.param[0], token.param[1]
                 # Mark the last layer end as the token before BEFORE_LAYER_CHANGE
-                layer_info.layer_end = token.prev
+                layer_info.layer_end = token
 
                 # Validate the height
                 toolset = [tool_change_info.tool_id for tool_change_info in layer_info.tools_sequence]
@@ -495,8 +404,7 @@ class PrimeTower:
         self.analyze_tool_status()
 
         # Calc band and brim info
-        self.pillar_brims_generate()
-        self.pillar_bands_generate()
+        self.generate_pillar_bands()
 
         t_end = time.time()
         if conf.PERF_INFO:

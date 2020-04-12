@@ -13,6 +13,10 @@ class GCodeSerializeException(Exception):
     def __init__(self, message):
         self.message = message
 
+class GCodeStateException(Exception):
+    def __init__(self, message):
+        self.message = message
+
 # Token 
 # Is a double linked list node (makes it easy to iterate
 class Token(doublelinkedlist.Node):
@@ -85,6 +89,7 @@ class Params(Token):
 # params formats 
 valid_params_format = {
     'TC_TEMP_INITIALIZE'    : [],
+    'TC_TEMP_SHUTDOWN'      : [],
     'BEFORE_LAYER_CHANGE'   : [int, float],
     'AFTER_LAYER_CHANGE'    : [int, float],
     'TOOL_BLOCK_START'      : [int],
@@ -110,7 +115,7 @@ class GCodeAnalyzer:
                      feed_rate = None, 
                      tool_selected = None, 
                      tool_extrusion = None, 
-                     retracted = None, 
+                     tool_retraction = None,
                      e_relative = True):
             self.x = x
             self.y = y
@@ -122,10 +127,10 @@ class GCodeAnalyzer:
                 self.tool_extrusion = {}
             else:
                 self.tool_extrusion = tool_extrusion
-            if retracted is None:
-                self.retracted = GCodeAnalyzer.State.UNRETRACTED
+            if tool_retraction is None:
+                self.tool_retraction = {}
             else:
-                self.retracted = retracted
+                self.tool_retraction = tool_retraction
             self.e_relative = e_relative
 
         # Copy
@@ -138,7 +143,7 @@ class GCodeAnalyzer:
                 feed_rate = self.feed_rate,
                 tool_selected = self.tool_selected,
                 tool_extrusion = self.tool_extrusion.copy(),
-                retracted = self.retracted,
+                tool_retraction = self.tool_retraction.copy(),
                 e_relative = self.e_relative)
             return lhs
 
@@ -172,6 +177,21 @@ class GCodeAnalyzer:
                 return min(self.feed_rate, conf.printer_extruder_speed[self.tool_selected])
             else:
                 return conf.extruder_speed[self.tool_selected]
+
+        # Setter/getter for retraction
+        @property 
+        def retraction(self):
+            if self.tool_selected is None:
+                raise GCodeStateException("Requesting retraction state while no tool is active")
+            if self.tool_selected not in self.tool_retraction:
+                self.tool_retraction[self.tool_selected] = GCodeAnalyzer.State.UNRETRACTED
+            return self.tool_retraction[self.tool_selected]
+
+        @retraction.setter
+        def retraction(self, val):
+            if self.tool_selected is None:
+                raise GCodeStateException("Setting retraction state while no tool is active")
+            self.tool_retraction[self.tool_selected] = val
 
         # Setter/getter for e
         @property
@@ -233,10 +253,10 @@ class GCodeAnalyzer:
             elif token.type == Token.GCODE:
                 # Add retraction
                 if token.gcode == 'G10': # Firmware retract
-                    token.state_post.retracted = GCodeAnalyzer.State.RETRACTED
+                    token.state_post.retraction = GCodeAnalyzer.State.RETRACTED
                     token.runtime = conf.runtime_default
                 elif token.gcode == 'G11': # Firmware unretract
-                    token.state_post.retracted = GCodeAnalyzer.State.UNRETRACTED
+                    token.state_post.retraction = GCodeAnalyzer.State.UNRETRACTED
                     token.runtime = conf.runtime_default
                 elif token.gcode == 'G1': # Controlled move
 
@@ -297,12 +317,18 @@ class GCodeAnalyzer:
         return self.tokens
 
     # Print total runtime
-    def print_total_runtime(self):
+    @property
+    def total_runtime_str(self):
         runtime_s = int(self.total_runtime)
         runtime_h = math.floor(runtime_s / 3600)
         runtime_m = math.floor((runtime_s % 3600) / 60)
         runtime_s -= (runtime_h * 3600 + runtime_m * 60)  
-        print("GCodeAnalyzer: Total runtime estimation: {h}h{m}m{s}s".format(h = runtime_h, m = runtime_m, s = runtime_s))
+        return "{h}h{m}m{s}s".format(h = runtime_h, m = runtime_m, s = runtime_s)
+
+    def print_total_runtime(self):
+        print("GCodeAnalyzer: Total runtime estimation: {runtime}".format(runtime = self.total_runtime_str))
+
+
 
     # Parse the file and populate the tokens
     def parse(self, gcode_file):
@@ -453,4 +479,18 @@ class GCodeValidator:
             print("Warning! - GCodeValidator: Didn't found a tool change instruction, injecting T0 as a default tool...")
             first_layer_header.append_node_left(ToolChange(-1, 0))
     
+    # verify the retract sequence
+    def analyze_retracts(self, gcode_analyzer):
+        for token in gcode_analyzer.analyze_state():
+            if token.type == Token.GCODE and token.gcode == 'G10':
+                if token.state_pre.retraction == GCodeAnalyzer.State.RETRACTED:
+                    print("Error: Two subsequent retractions - error in generated GCode")
+                    return False
+
+            if token.type == Token.GCODE and token.gcode == 'G11':
+                if token.state_pre.retraction == GCodeAnalyzer.State.UNRETRACTED:
+                    print("Error: Two subsequent unretractions - error in generated GCode")
+                    return False
+
+        return True
 

@@ -37,16 +37,17 @@ printer_extruder_speed                   = [7200] * len(retract_lift) # Cystomiz
 # Prime tower settings
 prime_tower_x = 250.0                   # Prime tower position X
 prime_tower_y = 100.0                   # Prime tower position Y
-prime_tower_r = 10.0                    # Prime tower maximum radius
+prime_tower_r = 15.0                    # Prime tower maximum radius
 prime_tower_print_speed = 1800          # Prime tower print speed 1800mm/min
 prime_tower_move_speed = 12000          # Prime tower move speed (into and out of prime tower)
     
 # Prime tower bands 
-prime_tower_band_width = 4              # Number of prime tower band width per tool 
-prime_tower_band_num_faces = 36         # Prime tower number of faces 
+prime_tower_band_width = 2              # Number of prime tower band width per tool 
+prime_tower_band_num_faces = 4          # Prime tower number of faces 
 prime_tower_optimize_layers = True      # Enable layer optimization
     
 brim_width = 6                          # Number of prime band brims
+brim_height = 3                         # How tall should be the brim (number of layers)
 
 # Runtime estimates - tweak
 runtime_tool_change = 10                # Fixed time to change the tool [s]
