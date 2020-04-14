@@ -14,7 +14,7 @@ GCODE_VERBOSE = True
 tool_temperature_layer0                  = [int(t) for t in os.environ['SLIC3R_FIRST_LAYER_TEMPERATURE'].split(',')]
 tool_temperature_layerN                  = [int(t) for t in os.environ['SLIC3R_TEMPERATURE'].split(',')]
 tool_pcfan_disable_first_layers          = [int(l) for l in os.environ['SLIC3R_DISABLE_FAN_FIRST_LAYERS'].split(',')]
-tool_pcfan_speed                         = [float(s) / 255.0 for s in os.environ['SLIC3R_MAX_FAN_SPEED'].split(',')]
+tool_pcfan_speed                         = [float(s) / 100.0 for s in os.environ['SLIC3R_MAX_FAN_SPEED'].split(',')]
 tool_nozzle_diameter                     = [float(d) for d in os.environ['SLIC3R_NOZZLE_DIAMETER'].split(',')]
 tool_extrusion_multiplier                = [float(m) for m in os.environ['SLIC3R_EXTRUSION_MULTIPLIER'].split(',')]
 tool_filament_diameter                   = [float(d) for d in os.environ['SLIC3R_FILAMENT_DIAMETER'].split(',')]
@@ -42,8 +42,8 @@ prime_tower_print_speed = 1800          # Prime tower print speed 1800mm/min
 prime_tower_move_speed = 12000          # Prime tower move speed (into and out of prime tower)
     
 # Prime tower bands 
-prime_tower_band_width = 2              # Number of prime tower band width per tool 
-prime_tower_band_num_faces = 4          # Prime tower number of faces 
+prime_tower_band_width = 3              # Number of prime tower band width per tool 
+prime_tower_band_num_faces = 16          # Prime tower number of faces 
 prime_tower_optimize_layers = True      # Enable layer optimization
     
 brim_width = 6                          # Number of prime band brims
@@ -54,7 +54,7 @@ runtime_tool_change = 10                # Fixed time to change the tool [s]
 runtime_default     = 0                 # Default instruction time 
 
 # Temp managment
-temp_idle_delta     = 20
+temp_idle_delta     = 30
 temp_heating_rate   = 0.6  # Heating rate estimate (in C/s)
 temp_cooling_rate   = 0.8  # Cooling rate estimate (in C/s)
 # Calculate for specific setup
@@ -120,5 +120,13 @@ def tool_temperature(layer_num, tool_id):
 def validate_slc3r_config():
     if int(os.environ['SLIC3R_USE_FIRMWARE_RETRACTION']) == 0:
         raise ConfException("Slic3r is not configured to use Firmware retractions")
+
+    # Check tool change retractions
+    if max([int(retraction) for retraction in os.environ['SLIC3R_RETRACT_LENGTH_TOOLCHANGE'].split(',')]) > 0:
+        raise ConfException("Slic3r has non 0 'Retraction when tool disabled - Length' setting, set it to 0 for all extruders.")
+
+    if int(os.environ['SLIC3R_WIPE_TOWER']) != 0:
+        raise ConfException("Slic3r wipe tower enabled, please disable")
+
 
   

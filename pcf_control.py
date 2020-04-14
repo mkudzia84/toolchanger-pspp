@@ -44,7 +44,7 @@ class PartCoolingFanController:
         # Go over all the tool changes
         for tool_change in self.tool_change_seq:
             # Disable the old tool
-            tool_change.append_node_left(gcode_analyzer.GCode('M107'))
+            tool_change.append_node_left(gcode_analyzer.GCode('M106', {'S' : 0}))
 
             layer_num = tool_change.state_post.layer_num
             if layer_num is not None and layer_num > conf.tool_pcfan_disable_first_layers[tool_change.next_tool]:
