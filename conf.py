@@ -24,6 +24,8 @@ tool_max_layer_height                    = [float(h) for h in os.environ['SLIC3R
     
 retract_lift                             = [float(h) for h in os.environ['SLIC3R_RETRACT_LIFT'].split(',')]
 
+filament_type                            = [filament for filament in os.environ['SLIC3R_FILAMENT_TYPE'].split(';')]
+
 # Settings to customize by user
 retract_lift_speed = 15000              # Retract lift speed in mm/mm
 

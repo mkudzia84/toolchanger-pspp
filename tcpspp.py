@@ -12,6 +12,9 @@ import prime_tower
 import thermal_control
 import pcf_control
    
+# Build tool_filament name
+def tool_filament_names(layer_info):
+    return '_'.join(["T{tool_id}-{filament}".format(tool_id = tool, filament = conf.filament_type[tool]) for tool in (layer_info.tools_active | layer_info.tools_idle)])
 
 def main():
     if len(sys.argv) < 2:
@@ -67,7 +70,7 @@ def main():
 
     print("-----------------------------------------")
     print(" TC-PSPP : Writing modified file...      ")
-    filename_out = filename[0:filename.rfind('.gcode')] + '_' + gcode.total_runtime_str + '.gcode'
+    filename_out = filename[0:filename.rfind('.gcode')] + '_' + tool_filament_names(tower.layers[0]) + '_' + gcode.total_runtime_str + '.gcode'
     print(" Writing to {filename}".format(filename = filename_out))
 
     with open(filename_out, mode='w', encoding='utf8') as gcode_out:
