@@ -14,6 +14,10 @@ The script includes the following enhancements:
 - PCF speed management
 - Validation/stripping of the GCode (i.e. Merlin M900, mapping of the fan ranges etc.)
 
+##### Change Log
+###### 15/04/2020 
+Added T{tool}-{filament_type} pair generation into the output file name
+
 #### Prime Tower Generation
 
 The wipe tower functionality in PrusaSlicer is build and optimized for a single extruder/multi-material setup.
