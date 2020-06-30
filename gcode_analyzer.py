@@ -103,9 +103,6 @@ class GCodeAnalyzer:
     # GCode state
     class State:
 
-        UNRETRACTED = 1
-        RETRACTED = 2
-
         # Constructor
         def __init__(self, 
                      x = None, 
@@ -178,20 +175,41 @@ class GCodeAnalyzer:
             else:
                 return conf.extruder_speed[self.tool_selected]
 
-        # Setter/getter for retraction
+        # Is tool retracted
+        @property 
+        def is_retracted(self):
+            if self.tool_selected is None:
+                raise GCodeStateException("Requesting retraction state while no tool is active")
+            if self.tool_selected not in self.tool_retraction:
+                return False
+            return self.tool_retraction[self.tool_selected] < 0.0
+
+        # Getter for retraction
         @property 
         def retraction(self):
             if self.tool_selected is None:
                 raise GCodeStateException("Requesting retraction state while no tool is active")
             if self.tool_selected not in self.tool_retraction:
-                self.tool_retraction[self.tool_selected] = GCodeAnalyzer.State.UNRETRACTED
+                self.tool_retraction[self.tool_selected] = 0.0
             return self.tool_retraction[self.tool_selected]
-
-        @retraction.setter
-        def retraction(self, val):
+    
+        # Functions to mark retraction
+        # If distance is None - treat this as FW command
+        def mark_retracted(self, distance = None):
             if self.tool_selected is None:
                 raise GCodeStateException("Setting retraction state while no tool is active")
-            self.tool_retraction[self.tool_selected] = val
+            if self.tool_selected not in self.tool_retraction:
+                self.tool_retraction[self.tool_selected] = 0.0
+            if distance != None:
+                self.tool_retraction[self.tool_selected] += distance
+            else:
+                self.tool_retraction[self.tool_selected] = -1.0
+
+        def mark_unretracted(self):
+            if self.tool_selected is None:
+                raise GCodeStateException("Setting retraction state while no tool is active")
+            self.tool_retraction[self.tool_selected] = 0.0
+                
 
         # Setter/getter for e
         @property
@@ -253,11 +271,17 @@ class GCodeAnalyzer:
             elif token.type == Token.GCODE:
                 # Add retraction
                 if token.gcode == 'G10': # Firmware retract
-                    token.state_post.retraction = GCodeAnalyzer.State.RETRACTED
-                    token.runtime = conf.runtime_default
+                    if conf.retraction_firmware == False:
+                        print(token)
+                        raise GCodeStateException("Encountered G10 gcode while firmware retraction is disabled")
+                    token.state_post.mark_retracted()
+                    token.runtime = conf.runtime_g10
                 elif token.gcode == 'G11': # Firmware unretract
-                    token.state_post.retraction = GCodeAnalyzer.State.UNRETRACTED
-                    token.runtime = conf.runtime_default
+                    if conf.retraction_firmware == False:
+                        print(token)
+                        raise GCodeStateException("Encountered G11 gcode while firmware retraction is disabled")
+                    token.state_post.mark_unretracted()
+                    token.runtime = conf.runtime_g11
                 elif token.gcode == 'G1': # Controlled move
 
                     # Move times
@@ -284,14 +308,23 @@ class GCodeAnalyzer:
                         if z_time > token.runtime: token.runtime = z_time
                     if 'E' in token.param:
                         tool_id = state_pre.tool_selected
+                        e_value = float(token.param['E'])
+
                         if state_pre.e_relative:
-                            state_post.tool_extrusion[tool_id] += float(token.param['E'])
+                            state_post.tool_extrusion[tool_id] += e_value
                         else: 
-                            state_post.tool_extrusion[tool_id] = float(token.param['E'])
+                            state_post.tool_extrusion[tool_id] = e_value
                         e0 = state_pre.tool_extrusion[tool_id]
                         e1 = state_post.tool_extrusion[tool_id]
                         e_time = abs(e1 - e0) * 120.0 / (state_pre.extrud_speed + state_post.extrud_speed)
                         if e_time > token.runtime: token.runtime = e_time
+
+                        # Handle the slicer based retractions
+                        if conf.retraction_firmware == False:
+                            if e_value < 0.0:
+                                state_post.mark_retracted(e_value)
+                            if e_value > 0.0 and state_pre.is_retracted:
+                                state_post.mark_unretracted()
 
                 elif token.gcode == 'M120': # Push state onto stack
                     # Push the copy of the current state onto the stack - experimental
@@ -300,6 +333,8 @@ class GCodeAnalyzer:
                 elif token.gcode == 'M121': # Pop state from the stack 
                     # Pop the copy of the current state from the stack - experimental
                     state_stack.pop()
+                    token.runtime = 0.0
+                else:
                     token.runtime = 0.0
 
             # PARAM
@@ -481,16 +516,21 @@ class GCodeValidator:
     
     # verify the retract sequence
     def analyze_retracts(self, gcode_analyzer):
+        result = True
+        if not conf.retraction_firmware:
+            print("Firmware retraction disabled, skipping validation")
+        return result
+
         for token in gcode_analyzer.analyze_state():
             if token.type == Token.GCODE and token.gcode == 'G10':
-                if token.state_pre.retraction == GCodeAnalyzer.State.RETRACTED:
+                if token.state_pre.is_retracted:
                     print("Error: Two subsequent retractions - error in generated GCode")
-                    return False
+                    result = False
 
             if token.type == Token.GCODE and token.gcode == 'G11':
-                if token.state_pre.retraction == GCodeAnalyzer.State.UNRETRACTED:
-                    print("Error: Two subsequent unretractions - error in generated GCode")
-                    return False
+                if not token.state_pre.is_retracted:
+                    print("Error: Two subsequent unretractions - error in generated GCode: seq {seq}".format(seq = token.seq))
+                    result = False
 
-        return True
+        return result
 

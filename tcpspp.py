@@ -25,6 +25,9 @@ def main():
 
     filename = sys.argv[1]
 
+    conf.slic3r_config_read()
+    conf.slic3r_config_validate()
+
     print("-----------------------------------------")
     print(" TC-PSPP : Parsing the file              ")
     gcode = gcode_analyzer.GCodeAnalyzer(filename)
@@ -41,7 +44,7 @@ def main():
     tower.print_report()
 
     print(" - Optimizing prime tower layout")
-    tower.optimize_layers()
+    #tower.optimize_layers()
     tower.print_report()
     
     print(" - Injecting Prime Tower GCode")
@@ -77,9 +80,9 @@ def main():
         for token in gcode.tokens:
             gcode_out.write(str(token) + '\n')
 
-    if conf.DEBUG == False:
-        print(" Removing old file {filename}".format(filename = filename))
-        os.remove(filename)
+    #if conf.DEBUG == False:
+    #    print(" Removing old file {filename}".format(filename = filename))
+    #    os.remove(filename)
 
     t_end = time.time()
     print("TC-PSPP: Done... [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
@@ -92,8 +95,13 @@ if __name__ == "__main__":
     try:
         main()
     except conf.ConfException as conf_err:
-        print("Configuration Error:")
-        print(conf_err.message)
+        print("Configuration error:")
+        print("[Error] " + conf_err.message)
+        time.sleep(60)
+        quit()
+    except gcode_analyzer.GCodeStateException as gcode_err:
+        print("GCode parsing error:")
+        print("[Error] " + gcode_err.message)
         time.sleep(60)
         quit()
 

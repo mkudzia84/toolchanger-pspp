@@ -108,63 +108,193 @@ class PrimeTowerLayerInfo(LayerInfo):
 
         return tokens
 
+    # Find wipe end point
+    def gcode_wipe_path(self, start_point, length, retract_length):
+        path = []
+        x0, y0, z0 = start_point.state_post.x, start_point.state_post.y, start_point.state_post.z
+        previous_move = start_point
+
+        accumulated_dist = 0.0
+        while accumulated_dist < length:
+            if previous_move.state_pre == None:
+                break
+            x1, y1, z1 = previous_move.state_pre.x, previous_move.state_pre.y, previous_move.state_pre.z
+
+            if z1 != z0:
+                break
+
+            dist = math.sqrt((x1-x0)**2 + (y1-y0)**2)
+
+            # If end
+            if dist + accumulated_dist > length:
+                # Check cutoff
+                dist_corrected = length - accumulated_dist
+                x1 = x0 + (x1 - x0) * (dist_corrected / dist)
+                y1 = y0 + (y1 - y0) * (dist_corrected / dist)
+                dist = dist_corrected
+
+            if dist != 0.0:
+                accumulated_dist += dist
+                x0, y0 = x1, y1
+                path.append((x1, y1, dist))
+
+            if previous_move.prev is not None:
+                previous_move = previous_move.prev
+
+        if accumulated_dist < length:
+            print("Warning: Calculated wipe path {wipe_length:0.2f}[mm] less then configured {length:0.2f}[mm]".format(wipe_length = accumulated_dist, length = length))
+
+
+        # Generate GCodes
+        gcode = doublelinkedlist.DLList()
+
+        if len(path) > 2:
+            for vertex in path:
+                to_retract = -retract_length * (vertex[2]) / accumulated_dist
+                gcode.append_node(gcode_analyzer.GCode('G1', {'X' : vertex[0], 'Y' : vertex[1], 'E' : to_retract}))
+            print("Calculated wipe path: {length}".format(length = accumulated_dist))
+        else:
+            # Just add retraction
+            gcode.append_node(gcode_analyzer.GCode('G1', {'E', -retract_length}))
+
+        gcode.head.comment = "wipe start"
+
+        return gcode
+
     # Inject move to prime tower
     # Assumes first gcode in gcode is G1 - move
     def inject_prime_tower_move_in(self, inject_point, gcode):
-        # - if prime tower Z is higher then current Z - inject Z move before moving to brim XY
-        # - if prime tower Z is lower then current Z - inject Z move after brim XY
-        if inject_point.state_post.z == None or inject_point.state_post.z < self.layer_z:
-            gcode.head.append_node_left(gcode_analyzer.GCode('G1', { 'Z' : self.layer_z} ))
-        elif inject_point.state_post.z > self.layer_z:
-            gcode.head.append_node(gcode_analyzer.GCode('G1', { 'Z' : self.layer_z} ))
+        inject_state = inject_point.state_post
 
-        # - if was unretracted - add retraction/unretraction around the first move from gcode
-        if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.UNRETRACTED:
-            gcode.head.append_node(gcode_analyzer.GCode('G11', comment = 'move-in detract'))
-            gcode.head.append_node_left(gcode_analyzer.GCode('G10', comment = 'move-in retract' ))
+        gcode_pre = doublelinkedlist.DLList()
+        gcode_post = doublelinkedlist.DLList()
+
+        # If firmware retracts - it is quite simple
+        if conf.retraction_firmware:
+            # - if prime tower Z is higher then current Z - inject Z move before moving to brim XY
+            # - if prime tower Z is lower then current Z - inject Z move after brim XY
+            if inject_state.z == None or inject_state.z < self.layer_z:
+                gcode.head.append_node_left(gcode_analyzer.GCode('G1', { 'Z' : self.layer_z} ))
+            elif inject_state.z > self.layer_z:
+                gcode.head.append_node(gcode_analyzer.GCode('G1', { 'Z' : self.layer_z} ))
+
+            # - if was unretracted - add retraction/unretraction around the first move from gcode
+            if not inject_state.is_retracted:
+                gcode.head.append_node(gcode_analyzer.GCode('G11', comment = 'move-in detract'))
+                gcode.head.append_node_left(gcode_analyzer.GCode('G10', comment = 'move-in retract' ))
         
-        # - if was retracted, just add unretraction after first move from gcode
-        if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.RETRACTED:
-            gcode.head.append_node(gcode_analyzer.GCode('G11', comment = 'move-in detract'))
-        gcode.head.append_node_left(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
+            # - if was retracted, just add unretraction after first move from gcode
+            if inject_state.is_retracted:
+                gcode.head.append_node(gcode_analyzer.GCode('G11', comment = 'move-in detract'))
+            gcode.head.append_node_left(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
+
+        # If not firmware retract - do a move manually
+        # If not retracted also do a wipe move (not longer then 1mm)
+        if not conf.retraction_firmware:
+            # If not retracted do a wipe move
+            to_detract = 0.0
+            if inject_state.is_retracted:
+                to_detract = abs(inject_state.retraction)
+            else:
+                # We will need to detract same what retract in next step
+                to_detract = conf.retraction_length[inject_state.tool_selected]
+
+            # If retracted but we need to ajust the Z
+            gcode_pre = doublelinkedlist.DLList()
+            if inject_state.is_retracted:
+                move_z = self.layer_z + conf.retraction_zhop[inject_state.tool_selected]
+                if move_z > inject_state.z:
+                    gcode_pre.append_node(gcode_analyzer.GCode('G1', {'F', conf.prime_tower_move_speed}))
+                    gcode_pre.append_node(gcode_analyzer.GCode('G1', {'Z', move_z }))
+            else:
+                # Need to retract and Z-hop
+                move_z = max(inject_state.z, self.layer_z) + conf.retraction_zhop[inject_state.tool_selected]
+                
+                gcode_pre.append_node(gcode_analyzer.GCode('G1', {'F' : conf.retraction_speed[inject_state.tool_selected]}))
+                # Add the wipe
+                if conf.wipe_distance > 0.0:
+                    wipe_gcode = self.gcode_wipe_path(inject_point, conf.wipe_distance, conf.retraction_length[inject_state.tool_selected] / 2.0)
+                    gcode_pre.append_nodes(wipe_gcode)
+                    gcode_pre.append_node(gcode_analyzer.GCode('G1', {'E' : -conf.retraction_length[inject_state.tool_selected] / 2.0}))
+                else:
+                    gcode_pre.append_node(gcode_analyzer.GCode('G1', {'E' : -conf.retraction_length[inject_state.tool_selected]}))
+
+                gcode_pre.append_node(gcode_analyzer.GCode('G1', {'F', conf.prime_tower_move_speed}))
+                gcode_pre.append_node(gcode_analyzer.GCode('G1', {'Z', move_z }))
+
+            # Add the speed
+            gcode_pre.append_node(gcode_analyzer.GCode('G1', {'F', conf.prime_tower_move_speed}))
+
+            gcode_post = doublelinkedlist.DLList()
+            gcode_post.append_node(gcode_analyzer.GCode('G1', {'Z' : self.layer_z, 'E' : conf.retraction_length[inject_state.tool_selected]}))
+
+            # Add to gcode            
+            gcode.head.append_nodes_right(gcode_post)
+            gcode.head.append_nodes_left(gcode_pre)
 
         return gcode
 
     # Inject move out of prime tower
     def inject_prime_tower_move_out(self, inject_point, gcode):
+        inject_state = inject_point.state_post
+
         # - if prime tower is higher then inject point Z, move XY first and then Z
         # - if prime tower is lower then inject point Z, move Z first and then XY
-        if inject_point.state_post.z is None:
+        if inject_state.z is None:
             raise PrimeTowerException("Malformed GCode - injecting prime tower move-out code where Z is not set")
 
-        # No need to move out in 
-        # -To handle the situation where state is not set initially
-        # - Inject point is BEFORE_LAYER_END
-        # 
-        if inject_point.type != Token.PARAMS or inject_point.label != 'BEFORE_LAYER_CHANGE':
-            gcode.append_node(gcode_analyzer.GCode('G10', comment = 'move-out retract'))
-            if inject_point.state_post.x != None and inject_point.state_post.y != None:
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
-                if inject_point.state_post.z < self.layer_z:
-                    gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
-                    gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_point.state_post.z }))
-                elif inject_point.state_post.z > self.layer_z:
-                    gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_point.state_post.z }))
-                    gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
-                else:
-                    gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_point.state_post.x, 'Y' : inject_point.state_post.y }))
-                gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : inject_point.state_post.feed_rate}))
-            else:
-                print("Warning : X/Y position state not present, if this error apears more then once the GCode is malformed")
-
-            # Retract before 
-            # - if  tool was unretracted before entry point - unretract after the move
-            if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.UNRETRACTED:
-                gcode.append_node(gcode_analyzer.GCode('G11', comment = 'move-out detract'))
-        else:
-            if inject_point.state_post.retraction == gcode_analyzer.GCodeAnalyzer.State.RETRACTED:
+        # If firmware retracts - it is quite simple
+        if conf.retraction_firmware:
+            # No need to move out in 
+            # -To handle the situation where state is not set initially
+            # - Inject point is BEFORE_LAYER_END
+            # 
+            if inject_point.type != Token.PARAMS or inject_point.label != 'BEFORE_LAYER_CHANGE':
                 gcode.append_node(gcode_analyzer.GCode('G10', comment = 'move-out retract'))
+                if inject_state.x != None and inject_state.y != None:
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : conf.prime_tower_move_speed }))
+                    if inject_state.z < self.layer_z:
+                        gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_state.x, 'Y' : inject_state.y }))
+                        gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_state.z }))
+                    elif inject_state.z > self.layer_z:
+                        gcode.append_node(gcode_analyzer.GCode('G1', { 'Z' : inject_state.z }))
+                        gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_state.x, 'Y' : inject_state.y }))
+                    else:
+                        gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_state.x, 'Y' : inject_state.y }))
+                    gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : inject_state.feed_rate}))
+                else:
+                    print("Warning : X/Y position state not present, if this error apears more then once the GCode is malformed")
 
+                # Retract before 
+                # - if  tool was unretracted before entry point - unretract after the move
+                if not inject_state.is_retracted:
+                    gcode.append_node(gcode_analyzer.GCode('G11', comment = 'move-out detract'))
+            else:
+                if inject_state.is_retracted:
+                    gcode.append_node(gcode_analyzer.GCode('G10', comment = 'move-out retract'))
+
+        # If slicer retracts - more work
+        if not conf.retraction_firmware:
+            # No need to move out in:
+            # - to handle the situation where state is not set initially
+            # - Inject point is BEFORE_LAYER_END
+            if inject_point.type != Token.PARAMS or inject_point.label != 'BEFORE_LAYER_CHANGE':
+                move_z = max(inject_state.z, self.layer_z) + conf.retraction_zhop[inject_state.tool_selected]
+
+                gcode.append_node(gcode_analyzer.GCode('G1', {'F' : conf.retraction_speed[inject_state.tool_selected]}, comment = 'move-out retract'))
+                gcode.append_node(gcode_analyzer.GCode('G1', {'E' : -conf.retraction_length[inject_state.tool_selected]}))
+                gcode.append_node(gcode_analyzer.GCode('G1', {'F' : conf.prime_tower_move_speed}))
+                gcode.append_node(gcode_analyzer.GCode('G1', {'Z' : move_z }))
+                gcode.append_node(gcode_analyzer.GCode('G1', {'X' : inject_state.x, 'Y' : inject_state.y}))
+                gcode.append_node(gcode_analyzer.GCode('G1', {'Z' : inject_state.z}))
+                if not inject_state.is_retracted:
+                    gcode.append_node(gcode_analyzer.GCode('G1', {'F' : conf.retraction_speed[inject_state.tool_selected]}))
+                    gcode.append_node(gcode_analyzer.GCode('G1', {'E' : conf.retraction_length[inject_state.tool_selected]}))
+            else:
+                if inject_state.is_retracted:
+                    gcode.append_node(gcode_analyzer.GCode('G1', {'F' : conf.retraction_speed[inject_state.tool_selected]}))
+                    gcode.append_node(gcode_analyzer.GCode('G1', {'E' : -conf.retraction_length[inject_state.tool_selected]}))
+                
         return gcode
 
     # Inject prime tower layer gcode
