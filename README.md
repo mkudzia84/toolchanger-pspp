@@ -15,6 +15,11 @@ The script includes the following enhancements:
 - Validation/stripping of the GCode (i.e. Merlin M900, mapping of the fan ranges etc.)
 
 ##### Change Log
+
+###### 30/06/2020
+- Fixed issue with prime tower generation that would cause layers to be skipped (FIXED)
+- Fixed issue with no prime tower being generated when default (T0) tool is used first
+
 ###### 15/04/2020 
 Added T{tool}-{filament_type} pair generation into the output file name
 
