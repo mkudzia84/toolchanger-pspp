@@ -353,6 +353,9 @@ class PrimeTowerLayerInfo(LayerInfo):
             # 5) Go back to the previous position
             gcode = self.inject_prime_tower_move_out(inject_point, gcode)
 
+            # Info
+            gcode.head.append_node_left(gcode_analyzer.Comment("prime-tower layer #{layer_num}".format(layer_num = self.layer_num)))
+
             inject_point.append_nodes_right(gcode)
             if conf.DEBUG:
                 print("(DEBUG) Generated prime tower band for layer #{layer} for T{tool}".format(layer = self.layer_num, tool = tool_change.tool_id))
@@ -559,35 +562,46 @@ class PrimeTower:
                 break
 
             # 1) tool changes not in previous layer tool changes
-            prev_layer_tool_change_ids = [tool_info.tool_id for tool_info in optimized_layers[optimized_layer_indx].tool_change_seq]
-            next_layer_tool_change_ids = [tool_info.tool_id for tool_info in layer_info.tool_change_seq]
+            prev_layer_tool_seq = [tool.tool_id for tool in optimized_layers[optimized_layer_indx].tools_sequence]
+            next_layer_tool_seq = [tool.tool_id for tool in layer_info.tools_sequence]
+
+            can_squish = False
+            # Can only squish if:
+            # - last tool of the previous layer is same as first tool of next layer (i.e. no immediedate change on layer)
+            # AND
+            # - every tool used in next layer (after first) is different from every tool used in previous layer (except the last)
+            if prev_layer_tool_seq[-1] == next_layer_tool_seq[0] and len(set(prev_layer_tool_seq[:-1]) & set(next_layer_tool_seq[1:])) == 0:
+                can_squish = True
 
             # Update existing
-            if len(set(prev_layer_tool_change_ids) & set(next_layer_tool_change_ids)) == 0:
+            if can_squish:
                 # New tool change sequence
                 optimized_layer_height = optimized_layers[optimized_layer_indx].layer_height + layer_info.layer_height
                 optimized_active_tools = copy.copy(optimized_layers[optimized_layer_indx].tools_active)
-                optimized_active_tools.update(next_layer_tool_change_ids)
+                optimized_active_tools.update(next_layer_tool_seq[1:])
 
                 min_layer_height = conf.min_layer_height(optimized_active_tools)
                 max_layer_height = conf.max_layer_height(optimized_active_tools)
 
                 # 2) new layer height within margins
                 if min_layer_height <= optimized_layer_height <= max_layer_height:
-                    if conf.DEBUG:
-                        print("(DEBUG) optimized layer height : {height:0.2f} within [{min:0.2f},{max:0.2f}] for tools [{tools}]".format(
-                            height = optimized_layer_height, 
-                            min = min_layer_height, 
-                            max = max_layer_height,
-                            tools = ','.join([str(tool) for tool in optimized_active_tools])))
-                        print("(DEBUG) Prime tower layer #{layer_num} can be combined with previous layer, squashing...".format(layer_num = layer_info.layer_num))
-
                     # Update the old layer
-                    optimized_layers[optimized_layer_indx].tool_change_seq += layer_info.tool_change_seq
+                    optimized_layers[optimized_layer_indx].tool_change_seq += copy.copy(layer_info.tool_change_seq)
                     optimized_layers[optimized_layer_indx].tools_active = optimized_active_tools
+                    optimized_layers[optimized_layer_indx].tools_sequence += layer_info.tools_sequence[1:]
                     optimized_layers[optimized_layer_indx].layer_z = layer_info.layer_z
                     optimized_layers[optimized_layer_indx].layer_height = round(optimized_layer_height, 2)
                     optimized_layers[optimized_layer_indx].layer_end = layer_info.layer_end
+
+                    if conf.DEBUG:
+                        print("(DEBUG) optimized layer height : {height:0.2f} within [{min:0.2f},{max:0.2f}] for tools active [{tools}]".format(
+                            height = optimized_layer_height, 
+                            min = min_layer_height, 
+                            max = max_layer_height,
+                            tools = ','.join([str(tool.tool_id) for tool in optimized_layers[optimized_layer_indx].tools_sequence])))
+                        print("(DEBUG) Prime tower layer #{layer_num} can be combined with previous layer, squashing...".format(layer_num = layer_info.layer_num))
+                        print("(DEBUG) >> prev layer tools active : {seq}".format(seq = [str(tool) for tool in prev_layer_tool_seq]))
+                        print("(DEBUG) >> next layer tools active : {seq}".format(seq = [str(tool) for tool in next_layer_tool_seq]))
 
                     continue
 

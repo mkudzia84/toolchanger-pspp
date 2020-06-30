@@ -44,7 +44,7 @@ def main():
     tower.print_report()
 
     print(" - Optimizing prime tower layout")
-    #tower.optimize_layers()
+    tower.optimize_layers()
     tower.print_report()
     
     print(" - Injecting Prime Tower GCode")
