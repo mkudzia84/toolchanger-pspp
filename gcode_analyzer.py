@@ -230,6 +230,8 @@ class GCodeAnalyzer:
         else:
             self.parse(gcode_file)
         self.total_runtime = 0
+        # total filament usage
+        self.total_filament_usage = {}
 
         # cached list
         self.cached_tokens = []
@@ -246,6 +248,7 @@ class GCodeAnalyzer:
 
         # Total runtime of GCode
         self.total_runtime = 0.0
+        self.total_filament_usage = {}
 
         for token in self.tokens:
             token.seq = seq
@@ -312,8 +315,16 @@ class GCodeAnalyzer:
 
                         if state_pre.e_relative:
                             state_post.tool_extrusion[tool_id] += e_value
+                            if tool_id not in self.total_filament_usage:
+                                self.total_filament_usage[tool_id] = e_value
+                            else:
+                                self.total_filament_usage[tool_id] += e_value
                         else: 
                             state_post.tool_extrusion[tool_id] = e_value
+                            if tool_id not in self.total_filament_usage:
+                                self.total_filament_usage[tool_id] = e_value
+                            else:
+                                self.total_filament_usage[tool_id] += (e_value - state_pre.tool_extrusion[tool_id])
                         e0 = state_pre.tool_extrusion[tool_id]
                         e1 = state_post.tool_extrusion[tool_id]
                         e_time = abs(e1 - e0) * 120.0 / (state_pre.extrud_speed + state_post.extrud_speed)
@@ -363,6 +374,50 @@ class GCodeAnalyzer:
     def print_total_runtime(self):
         print("GCodeAnalyzer: Total runtime estimation: {runtime}".format(runtime = self.total_runtime_str))
 
+    def print_total_extrusion(self):
+        print("GCodeAnalyzer: Total Filament Usage [mm]:")
+        for k, v in self.total_filament_usage.items():
+            print(" - T{id} : {length:.2f}mm".format(id = k, length = v))
+
+        # Analyze the GCode 
+    # the tool change sequence (layer independant)
+    def update_statistics(self):
+        print("GCodeAnalyzer: updating PrusaSlicer GCODE statistics...")
+
+        filament_usage_mm = []
+        filament_usage_cm3 = []
+        filament_usage_g = []
+        # This is a walkaround - PrusaSlicer assumes tool 0 is present and activated at the beggining
+        # As such the record will always start with value for T0 - even if it's 0.0
+        if 0 not in self.total_filament_usage.keys():
+            filament_usage_mm.append(0.0)
+            filament_usage_cm3.append(0.0)
+            filament_usage_g.append(0.0)
+
+        for k, v in sorted(self.total_filament_usage.items()):
+            filament_usage_mm.append(v)
+            filament_usage_cm3.append(filament_usage_mm[-1] * conf.tool_filament_diameter[k] * 0.001)
+            filament_usage_g.append(filament_usage_g[-1] * conf.filament_density[k])
+
+        # Go over all of the tokens
+        for token in self.tokens:
+            # Setup the tool changes
+            if token.type == Token.COMMENT:
+                if "filament used [mm]" in token.text:
+                    token.text = "filament used [mm] = " + ",".join(["{length:.2f}".format(length = length) for length in filament_usage_mm])
+                    continue
+
+                if "filament used [cm3]" in token.text:
+                    token.text = "filament used [cm3] = " + ",".join(["{volume:.2f}".format(volume = volume) for volume in filament_usage_cm3])
+                    continue
+
+                if "filament used [g]" in token.text:
+                    token.text = "filament used [g] = " + ",".join(["{weight:.2f}".format(weight = weight) for weight in filament_usage_g])
+                    continue
+
+                if "estimated printing time (normal mode)" in token.text:
+                    token.text = "estimated printing time (normal mode) = {total_runtime}".format(total_runtime = self.total_runtime_str)
+                    continue
 
 
     # Parse the file and populate the tokens

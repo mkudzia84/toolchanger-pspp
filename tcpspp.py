@@ -63,6 +63,8 @@ def main():
     pcf_controller.inject_gcode()
 
     gcode.print_total_runtime()
+    gcode.print_total_extrusion()
+    gcode.update_statistics()
 
     # Run validation
     print("Validating...")
@@ -80,9 +82,10 @@ def main():
         for token in gcode.tokens:
             gcode_out.write(str(token) + '\n')
 
-    #if conf.DEBUG == False:
-    #    print(" Removing old file {filename}".format(filename = filename))
-    #    os.remove(filename)
+
+    if conf.DEBUG == False:
+        print(" Removing old file {filename}".format(filename = filename))
+        os.remove(filename)
 
     t_end = time.time()
     print("TC-PSPP: Done... [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))

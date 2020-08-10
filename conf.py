@@ -24,13 +24,13 @@ printer_extruder_speed                   = [7200, 7200, 7200, 7200] # Cystomize 
 # Prime tower settings
 prime_tower_x = 250.0                   # Prime tower position X
 prime_tower_y = 100.0                   # Prime tower position Y
-prime_tower_r = 15.0                    # Prime tower maximum radius
+prime_tower_r = 10                      # Prime tower maximum radius
 prime_tower_print_speed = 1800          # Prime tower print speed 1800mm/min
 prime_tower_move_speed = 12000          # Prime tower move speed (into and out of prime tower)
     
 # Prime tower bands 
-prime_tower_band_width = 3              # Number of prime tower band width per tool 
-prime_tower_band_num_faces = 16          # Prime tower number of faces 
+prime_tower_band_width = 2              # Number of prime tower band width per tool 
+prime_tower_band_num_faces = 8          # Prime tower number of faces 
 prime_tower_optimize_layers = True      # Enable layer optimization
     
 brim_width = 6                          # Number of prime band brims
@@ -64,6 +64,7 @@ tool_min_layer_height                    = [0.05, 0.05, 0.05, 0.05]
 tool_max_layer_height                    = [0.3, 0.3, 0.2, 0.2]
 
 filament_type                            = ['PLA', 'PLA', 'PLA', 'PLA']
+filament_density                         = [1.27, 1.27, 1.27, 1.27]
 
 # Retraction settings
 retraction_firmware                      = True
