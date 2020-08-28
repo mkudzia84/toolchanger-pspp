@@ -397,7 +397,7 @@ class GCodeAnalyzer:
         for k, v in sorted(self.total_filament_usage.items()):
             filament_usage_mm.append(v)
             filament_usage_cm3.append(filament_usage_mm[-1] * conf.tool_filament_diameter[k] * 0.001)
-            filament_usage_g.append(filament_usage_g[-1] * conf.filament_density[k])
+            filament_usage_g.append(filament_usage_cm3[-1] * conf.filament_density[k])
 
         # Go over all of the tokens
         for token in self.tokens:
