@@ -29,8 +29,8 @@ prime_tower_print_speed = 1800          # Prime tower print speed 1800mm/min
 prime_tower_move_speed = 12000          # Prime tower move speed (into and out of prime tower)
     
 # Prime tower bands 
-prime_tower_band_width = 2              # Number of prime tower band width per tool 
-prime_tower_band_num_faces = 8          # Prime tower number of faces 
+prime_tower_band_width = 3              # Number of prime tower band width per tool 
+prime_tower_band_num_faces = 12         # Prime tower number of faces 
 prime_tower_optimize_layers = True      # Enable layer optimization
     
 brim_width = 6                          # Number of prime band brims
@@ -73,6 +73,9 @@ retraction_speed                         = [2100, 2100, 2100, 2100]
 retraction_zhop                          = [0.6, 0.6, 0.6, 0.6]
 
 relative_E_distances                     = True
+
+bed_temp_layer0                          = [60, 60, 60, 60]
+bed_temp_layern                          = [60, 60, 60, 60]
 
 #==============================================================================
 
@@ -135,6 +138,14 @@ def tool_temperature(layer_num, tool_id):
     else:
         return tool_temperature_layerN[tool_id]
 
+def bed_temperature(layer_num, tools_used):
+    bed_temps = []
+    if layer_num == 0:
+        bed_temps = [bed_temp_layer0[tool] for tool in tools_used]
+    else:
+        bed_temps = [bed_temp_layern[tool] for tool in tools_used]
+    return max(bed_temps)
+
 # Load slic3r settings
 def slic3r_config_read():
     global tool_temperature_layer0
@@ -155,6 +166,9 @@ def slic3r_config_read():
     global retraction_zhop
 
     global relative_E_distances
+
+    global bed_temp_layer0
+    global bed_temp_layern
 
     if 'SLIC3R_FIRST_LAYER_TEMPERATURE' in os.environ:
         tool_temperature_layer0                  = [int(t) for t in os.environ['SLIC3R_FIRST_LAYER_TEMPERATURE'].split(',')]
@@ -177,6 +191,11 @@ def slic3r_config_read():
 
         # Settings
         relative_E_distances                     = True if int(os.environ['SLIC3R_USE_RELATIVE_E_DISTANCES']) == 1 else False
+
+        # Bed temperature
+        bed_temp_layer0                          = [int(t) for t in os.environ['SLIC3R_FIRST_LAYER_BED_TEMPERATURE'].split(',')]
+        bed_temp_layern                          = [int(t) for t in os.environ['SLIC3R_BED_TEMPERATURE'].split(',')]
+         
     else:
         print("Warning: Script run outside of PrusaSlicer, using defaults...")
 

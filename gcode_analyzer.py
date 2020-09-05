@@ -40,7 +40,7 @@ class GCode(Token):
         Token.__init__(self, type = Token.GCODE)
         self.gcode = gcode
         self.param = param
-        if self.param is None:
+        if param is None:
             self.param = {}
         self.comment = comment
         self.runtime = 0
@@ -521,7 +521,7 @@ class GCodeAnalyzer:
 # Used to fix the GCode coming out of Prusa
 class GCodeValidator:
 
-    gcodes_to_omit = ['M104', 'M109', 'M900']
+    gcodes_to_omit = ['M104', 'M109', 'M900', 'M140', 'M190']
 
     # Init
     def __init__(self):

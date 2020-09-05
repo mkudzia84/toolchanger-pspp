@@ -350,8 +350,9 @@ class PrimeTowerLayerInfo(LayerInfo):
                 gcode.append_nodes(gcode_idle)
 
             # 4) If was retracted - retract
-            # 5) Go back to the previous position
-            gcode = self.inject_prime_tower_move_out(inject_point, gcode)
+            # 5) Go back to the previous position - but not if block end 
+            if inject_point.type == Token.PARAMS and inject_point.label != 'TOOL_BLOCK_END':
+                gcode = self.inject_prime_tower_move_out(inject_point, gcode)
 
             # Info
             gcode.head.append_node_left(gcode_analyzer.Comment("prime-tower layer #{layer_num}".format(layer_num = self.layer_num)))
