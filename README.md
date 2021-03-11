@@ -7,6 +7,7 @@ using the RepRap3 firmware
 It has been tested on:
 PrusaSlicer 2.2
 E3D toolchanger with Duet 3 board running RR3.01RC4 firmware with 4 tools
+E3D toolchanger with Duet 2 Wifi board running RR3.1.1 firmware with 3 and 4 tools
 
 The script includes the following enhancements:
 - Robust prime tower generation 
@@ -15,6 +16,11 @@ The script includes the following enhancements:
 - Validation/stripping of the GCode (i.e. Merlin M900, mapping of the fan ranges etc.)
 
 ##### Change Log
+
+###### 11/03/2021
+- Added a configuration for the prime towers extrusion width
+- Changed the formula which calculates E for the prime tower
+- Inverted the influence of the tool_extrusion_multiplier
 
 ###### 05/09/2020
 - Added heated bed temperature control.

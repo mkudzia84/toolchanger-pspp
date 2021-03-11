@@ -380,20 +380,23 @@ class PrimeTower:
         # Enabled tools - in sequence
         layer0_tools = [tool.tool_id for tool in self.layers[0].tools_sequence] + sorted(self.layers[0].tools_idle)
 
+        # Factor for extrusion width
+        fact = conf.prime_tower_extrusion_width_fact
+
         # - BRIM
         current_r = conf.prime_tower_r
         for tool in layer0_tools:
             self.brim_radiuses[tool] = []
 
             for indx in range(0, conf.brim_width):
-                current_r += conf.tool_nozzle_diameter[tool] / 2.0
+                current_r += conf.tool_nozzle_diameter[tool] * fact / 2.0
                 self.brim_radiuses[tool].append(current_r)
-                current_r += conf.tool_nozzle_diameter[tool] / 2.0
+                current_r += conf.tool_nozzle_diameter[tool] * fact / 2.0
         current_r = conf.prime_tower_r
         while current_r > 1.5 * conf.tool_nozzle_diameter[0]:
-            current_r -= conf.tool_nozzle_diameter[0] / 2.0
+            current_r -= conf.tool_nozzle_diameter[0] * fact / 2.0
             self.brim_radiuses[tool].insert(0, current_r)
-            current_r -= conf.tool_nozzle_diameter[0] / 2.0
+            current_r -= conf.tool_nozzle_diameter[0] * fact / 2.0
 
         # - BAND
         current_r = conf.prime_tower_r
@@ -401,9 +404,9 @@ class PrimeTower:
             self.band_radiuses[tool] = []
 
             for indx in range(0, conf.prime_tower_band_width):
-                current_r += conf.tool_nozzle_diameter[tool] / 2.0
+                current_r += conf.tool_nozzle_diameter[tool] * fact / 2.0
                 self.band_radiuses[tool].append(current_r)
-                current_r += conf.tool_nozzle_diameter[tool] / 2.0
+                current_r += conf.tool_nozzle_diameter[tool] * fact / 2.0
 
     # Get the bands for specific layer
     def get_pillar_bands(self, layer_num, tool_id):
@@ -496,7 +499,7 @@ class PrimeTower:
                 toolset_max_layer_height = conf.max_layer_height(toolset)
 
                 # Layer height higher then max for the toolset (shouldn't happen!)
-                if layer_info.layer_height > toolset_max_layer_height:
+                if round(layer_info.layer_height, 5) > toolset_max_layer_height:
                     raise PrimeTowerException("Input layer #{layer_num} height {layer_height:0.4f} higher then max allowed for the toolset {tools}".format(
                         layer_num = layer_info.layer_num,
                         layer_height = layer_info.layer_height, 

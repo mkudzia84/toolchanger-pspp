@@ -27,6 +27,7 @@ prime_tower_y = 100.0                   # Prime tower position Y
 prime_tower_r = 10                      # Prime tower maximum radius
 prime_tower_print_speed = 1800          # Prime tower print speed 1800mm/min
 prime_tower_move_speed = 12000          # Prime tower move speed (into and out of prime tower)
+prime_tower_extrusion_width_fact = 1.2  # Prime tower extrusion width is fact * tool_nozzle_diameter
     
 # Prime tower bands 
 prime_tower_band_width = 3              # Number of prime tower band width per tool 
@@ -44,10 +45,10 @@ runtime_default     = 0                 # Default instruction time
 
 # Temp managment
 temp_idle_delta     = 30
-temp_heating_rate   = 0.6  # Heating rate estimate (in C/s)
-temp_cooling_rate   = 0.8  # Cooling rate estimate (in C/s)
+temp_heating_rate   = 0.6               # Heating rate estimate (in C/s)
+temp_cooling_rate   = 0.8               # Cooling rate estimate (in C/s)
 
-wipe_distance    = 0.0       # distance of wipe in mm
+wipe_distance    = 0.0                  # distance of wipe in mm
 
 #==============================================================================
 # Defaults - override while reading settings
@@ -124,9 +125,9 @@ def min_layer_height(tool_set):
 
 # Calculate extrusion length for a distance 
 def calculate_E(tool_id, layer_height, distance):
-    A_ex = ((float(tool_nozzle_diameter[tool_id]) - layer_height) * layer_height + math.pi * ((layer_height / 2.0) ** 2))
+    A_ex = float(tool_nozzle_diameter[tool_id]) * layer_height * prime_tower_extrusion_width_fact
     V_out = A_ex * distance 
-    E = (V_out * 4.0) / (math.pi * (float(tool_filament_diameter[tool_id]) ** 2) * float(tool_extrusion_multiplier[tool_id]))
+    E = (V_out * 4.0) * float(tool_extrusion_multiplier[tool_id]) / (math.pi * (float(tool_filament_diameter[tool_id]) ** 2))
         
     return round(E,5)
 
