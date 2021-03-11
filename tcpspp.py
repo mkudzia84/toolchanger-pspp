@@ -25,6 +25,9 @@ def main():
 
     filename = sys.argv[1]
 
+    conf.slic3r_config_read()
+    conf.slic3r_config_validate()
+
     print("-----------------------------------------")
     print(" TC-PSPP : Parsing the file              ")
     gcode = gcode_analyzer.GCodeAnalyzer(filename)
@@ -60,6 +63,8 @@ def main():
     pcf_controller.inject_gcode()
 
     gcode.print_total_runtime()
+    gcode.print_total_extrusion()
+    gcode.update_statistics()
 
     # Run validation
     print("Validating...")
@@ -77,6 +82,7 @@ def main():
         for token in gcode.tokens:
             gcode_out.write(str(token) + '\n')
 
+
     if conf.DEBUG == False:
         print(" Removing old file {filename}".format(filename = filename))
         os.remove(filename)
@@ -92,8 +98,13 @@ if __name__ == "__main__":
     try:
         main()
     except conf.ConfException as conf_err:
-        print("Configuration Error:")
-        print(conf_err.message)
+        print("Configuration error:")
+        print("[Error] " + conf_err.message)
+        time.sleep(60)
+        quit()
+    except gcode_analyzer.GCodeStateException as gcode_err:
+        print("GCode parsing error:")
+        print("[Error] " + gcode_err.message)
         time.sleep(60)
         quit()
 

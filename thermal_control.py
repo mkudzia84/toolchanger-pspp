@@ -68,6 +68,7 @@ class TemperatureController:
         self.tool_activation_seq = {}
         self.temp_header = None
         self.temp_footer = None
+        self.temp_layer1 = None
 
     # Analyze the layer information and generate 
     # the tool change sequence (layer independant)
@@ -90,15 +91,23 @@ class TemperatureController:
             # Find the location of ;; TC_TEMP_INITIALIZE
             if token.type == Token.PARAMS and token.label == 'TC_TEMP_INITIALIZE':
                 self.temp_header = token
+                continue
 
             # Find the location of ;; TC_TEMP_SHUTDOWN
             if token.type == Token.PARAMS and token.label == 'TC_TEMP_SHUTDOWN':
                 self.temp_footer = token
+                continue
+
+            # Find the first layer start
+            if token.type == Token.PARAMS and token.label == 'BEFORE_LAYER_CHANGE' and token.param[0] == 1:
+                self.temp_layer1 = token
+                continue
 
             # Remove the existing tokens for temp managment
             if token.type == Token.GCODE and token.gcode == 'M109':
                 print("TempController: Removed an existing M109 gcode")
                 gcode_analyzer.tokens.remove_node(token)
+                continue
 
             # Setup the tool changes
             if token.type == Token.TOOLCHANGE:
@@ -189,6 +198,10 @@ class TemperatureController:
                 # Insert temp wait at TC_INIT
                 gcode_init.append_node(gcode_analyzer.GCode('M104', {'S' : tool_temp, 'T' : tool_id}))
                 gcode_wait.append_node(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
+
+        # Inject code for bed temperature 
+        gcode_init.append_node(gcode_analyzer.GCode('M140', {'S' : conf.bed_temperature(0, self.tool_activation_seq.keys())}))
+        gcode_wait.append_node(gcode_analyzer.GCode('M190'))
 
         # Inject the gcode at TC_INIT
         self.temp_header.append_nodes_right(gcode_wait)
@@ -291,8 +304,14 @@ class TemperatureController:
         self.temp_footer.append_node(gcode_analyzer.GCode('M104', {'S' : 0}))
         self.temp_footer.append_node(gcode_analyzer.GCode('M140', {'S' : 0}))
 
+    # Set the bed temperatures 
+    def gcode_prep_bed_temp(self):
+        self.temp_layer1.append_node(gcode_analyzer.GCode('M140', {'S' : conf.bed_temperature(1, self.tool_activation_seq.keys())}))
+        self.temp_layer1.append_node(gcode_analyzer.GCode('M190'))
+
     # Inject the GCode
     def inject_gcode(self):
         self.gcode_prep_header()
+        self.gcode_prep_bed_temp()
         self.gcode_prep_toolchange()
         self.gcode_prep_deactivation()
