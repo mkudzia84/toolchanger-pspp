@@ -3,6 +3,9 @@ import doublelinkedlist
 import conf
 import copy, math, time                                           # G11 unretract (Firmware)
 
+import logging
+logger = logging.getLogger(__name__)
+
 # Parse exception
 class GCodeParseException(Exception):
     def __init__(self, message, line = None):
@@ -226,7 +229,7 @@ class GCodeAnalyzer:
     # Initialize
     def __init__(self, gcode_file = None):
         if gcode_file is None:
-            self.tokens = doublelinkedlist.DLLList()
+            self.tokens = doublelinkedlist.DLList()
         else:
             self.parse(gcode_file)
         self.total_runtime = 0
@@ -273,15 +276,13 @@ class GCodeAnalyzer:
             # GCode 
             elif token.type == Token.GCODE:
                 # Add retraction
-                if token.gcode == 'G10': # Firmware retract
+                if token.gcode == 'G10' and len(token.param) == 0: # Firmware retract
                     if conf.retraction_firmware == False:
-                        print(token)
                         raise GCodeStateException("Encountered G10 gcode while firmware retraction is disabled")
                     token.state_post.mark_retracted()
                     token.runtime = conf.runtime_g10
                 elif token.gcode == 'G11': # Firmware unretract
                     if conf.retraction_firmware == False:
-                        print(token)
                         raise GCodeStateException("Encountered G11 gcode while firmware retraction is disabled")
                     token.state_post.mark_unretracted()
                     token.runtime = conf.runtime_g11
@@ -372,17 +373,17 @@ class GCodeAnalyzer:
         return "{h}h{m}m{s}s".format(h = runtime_h, m = runtime_m, s = runtime_s)
 
     def print_total_runtime(self):
-        print("GCodeAnalyzer: Total runtime estimation: {runtime}".format(runtime = self.total_runtime_str))
+        logger.info("Total runtime estimation: {runtime}".format(runtime = self.total_runtime_str))
 
     def print_total_extrusion(self):
-        print("GCodeAnalyzer: Total Filament Usage [mm]:")
+        logger.info("GCodeAnalyzer: Total Filament Usage [mm]:")
         for k, v in self.total_filament_usage.items():
-            print(" - T{id} : {length:.2f}mm".format(id = k, length = v))
+            logger.info(" - T{id} : {length:.2f}mm".format(id = k, length = v))
 
         # Analyze the GCode 
     # the tool change sequence (layer independant)
     def update_statistics(self):
-        print("GCodeAnalyzer: updating PrusaSlicer GCODE statistics...")
+        logger.info("Updating PrusaSlicer GCODE statistics...")
 
         filament_usage_mm = []
         filament_usage_cm3 = []
@@ -541,15 +542,13 @@ class GCodeValidator:
 
             # gcodes to omit - delete
             if token.type == Token.GCODE and token.gcode in GCodeValidator.gcodes_to_omit:
-                if conf.DEBUG:
-                    print("(DEBUG) GCodeValidator: Deleting {token}".format(token = str(token)))
+                logger.debug("Deleting {token}".format(token = str(token)))
                 gcode_analyzer.tokens.remove_node(token)
                 continue
 
             # Token to fix 
             if token.type == Token.GCODE and token.gcode == 'M106':
-                if conf.DEBUG:
-                    print("(DEBUG) GCodeValidator: Fixing M106 from 0..255 to 0-1.0 range")
+                logger.debug("Fixing M106 from 0..255 to 0-1.0 range")
                 token.param['S'] = float(token.param['S']) / 255.0
                 continue
 
@@ -566,25 +565,25 @@ class GCodeValidator:
 
         # Inject the tool change to T0
         if found_tool == False:
-            print("Warning! - GCodeValidator: Didn't found a tool change instruction, injecting T0 as a default tool...")
+            logger.warn("Didn't found a tool change instruction, injecting T0 as a default tool...")
             first_layer_header.append_node_left(ToolChange(-1, 0))
     
     # verify the retract sequence
     def analyze_retracts(self, gcode_analyzer):
         result = True
         if not conf.retraction_firmware:
-            print("Firmware retraction disabled, skipping validation")
+            logger.info("Firmware retraction disabled, skipping validation")
         return result
 
         for token in gcode_analyzer.analyze_state():
             if token.type == Token.GCODE and token.gcode == 'G10':
                 if token.state_pre.is_retracted:
-                    print("Error: Two subsequent retractions - error in generated GCode")
+                    logger.error("Two subsequent retractions - error in generated GCode")
                     result = False
 
             if token.type == Token.GCODE and token.gcode == 'G11':
                 if not token.state_pre.is_retracted:
-                    print("Error: Two subsequent unretractions - error in generated GCode: seq {seq}".format(seq = token.seq))
+                    logger.error("Two subsequent unretractions - error in generated GCode: seq {seq}".format(seq = token.seq))
                     result = False
 
         return result

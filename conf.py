@@ -1,4 +1,6 @@
 import os, math
+from logging import Logger
+logger = Logger(__name__)
 
 # Configuration exception
 class ConfException(Exception):
@@ -6,7 +8,7 @@ class ConfException(Exception):
         self.message = message
 
 
-DEBUG = False
+REMOVE_GCODE = True
 PERF_INFO = True
 GCODE_VERBOSE = True
 
@@ -199,7 +201,7 @@ def slic3r_config_read():
         bed_temp_layern                          = [int(t) for t in os.environ['SLIC3R_BED_TEMPERATURE'].split(',')]
          
     else:
-        print("Warning: Script run outside of PrusaSlicer, using defaults...")
+        logger.warn("Script run outside of PrusaSlicer, using defaults...")
 
 
 # Validate slic3r settings
