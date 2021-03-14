@@ -546,6 +546,13 @@ class GCodeValidator:
                 gcode_analyzer.tokens.remove_node(token)
                 continue
 
+            # G10 temperature control to fix if no tool selected - set to T0
+            if token.type == Token.GCODE and token.gcode == 'G10' and len(token.param) == 1:
+                if ('S' in token.param or 'R' in token.param) and 'P' not in token.param:
+                    logger.warn("G10 token doesn't specify active tool, setting to T0")
+                    token.param['P'] = 0
+                continue
+
             # Token to fix 
             if token.type == Token.GCODE and token.gcode == 'M106':
                 logger.debug("Fixing M106 from 0..255 to 0-1.0 range")
