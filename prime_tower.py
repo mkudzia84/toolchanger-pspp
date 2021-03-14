@@ -493,7 +493,7 @@ class PrimeTower:
                 toolset_max_layer_height = conf.max_layer_height(toolset)
 
                 # Layer height higher then max for the toolset (shouldn't happen!)
-                if layer_info.layer_height > toolset_max_layer_height:
+                if round(layer_info.layer_height, 5) > toolset_max_layer_height:
                     raise PrimeTowerException("Input layer #{layer_num} height {layer_height:0.4f} higher then max allowed for the toolset {tools}".format(
                         layer_num = layer_info.layer_num,
                         layer_height = layer_info.layer_height, 
