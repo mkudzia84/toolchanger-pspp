@@ -184,7 +184,7 @@ class TemperatureController:
                 # Insert idle temp in TC_INIT
                 # Insert ramp up at inject point
                 # Insert temp wait before tool change
-                gcode_init.append_node(gcode_analyzer.GCode('G10', {'P' : tool_id, 'R' : tool_temp - conf.temp_idle_delta, }))
+                gcode_init.append_node(gcode_analyzer.GCode('M104', {'T' : tool_id, 'S' : tool_temp - conf.temp_idle_delta}))
                 gcode_wait.append_node(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
                 inject_point.append_node(gcode_analyzer.GCode('G10', {'P' : tool_id, 'R' : tool_temp}))
@@ -194,7 +194,7 @@ class TemperatureController:
 
                 # Insert target temp at TC_INIT
                 # Insert temp wait at TC_INIT
-                gcode_init.append_node(gcode_analyzer.GCode('G10', {'P' : tool_id, 'R' : tool_temp}))
+                gcode_init.append_node(gcode_analyzer.GCode('M104', {'T' : tool_id, 'S' : tool_temp}))
                 gcode_wait.append_node(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
         # Inject code for bed temperature 
