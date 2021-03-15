@@ -8,7 +8,7 @@ class ConfException(Exception):
         self.message = message
 
 
-REMOVE_GCODE = True
+REMOVE_GCODE = False
 PERF_INFO = True
 GCODE_VERBOSE = True
 
