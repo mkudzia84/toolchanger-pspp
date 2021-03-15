@@ -16,6 +16,11 @@ The script includes the following enhancements:
 
 ##### Change Log
 
+###### 15/03/2020
+- Rollback of the G10 temperature contol back to M104 (for initial setup)
+This is because G10 command doesn't switch the heater from Off->Standby and there no explicit G-code to do that.
+This would mean that tools wouldn't be pre-heated untill first activation.
+
 ###### 14/03/2020
 - Tested compatibility with Prusa Slicer 2.3
 - Added compatibility with the new RepRapFirmware G-code flavour in PrusaSlicer 2.3, Supported flavours now are RepRapFirmware and RepRap/Sprinter
