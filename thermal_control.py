@@ -6,13 +6,16 @@ import doublelinkedlist
 import time
 
 from gcode_analyzer import Token, GCodeAnalyzer
-from tool_change_plan import ToolChangeInfo
+from tool_change_plan import ToolChangeInfo, ToolChangeException
 from conf import ConfException
 
 # Tool change exception
 class ThermalControlException(Exception):
     def __init__(self, message):
         self.message = message
+
+import logging
+logger = logging.getLogger(__name__)
 
 # inject temperatures control into the gcode
 #
@@ -76,12 +79,11 @@ class TemperatureController:
         t_start = time.time()
 
         # Generates the list of tool_activations per tool
-        if conf.DEBUG:
-            print("(DEBUG) TempController: Generating tool activation sequence per tool...")
+        logger.debug("Generating tool activation sequence per tool...")
 
         # Go over the tokens to generate the Tool Change Info 
         # Calculate the runtimes in the process
-        print("TempController - Estimating the gcode runtimes")
+        logger.info("Estimating the gcode runtimes")
 
         # Current tool head
         current_tool = None
@@ -105,7 +107,7 @@ class TemperatureController:
 
             # Remove the existing tokens for temp managment
             if token.type == Token.GCODE and token.gcode == 'M109':
-                print("TempController: Removed an existing M109 gcode")
+                logger.info("Removed an existing M109 gcode")
                 gcode_analyzer.tokens.remove_node(token)
                 continue
 
@@ -123,7 +125,7 @@ class TemperatureController:
                 tool_id = token.param[0]
                 if tool_id != -1:
                     if tool_id != current_tool.tool_id:
-                        raise ToolChangeException("Tool id {tool_id} from TOOL_BLOCK_START doesn't match last active tool in layer".format(tool_id = tool_id))
+                        raise ToolChangeException(message = "Tool id {tool_id} from TOOL_BLOCK_START doesn't match last active tool in layer".format(tool_id = tool_id), tool_id = tool_id)
                     current_tool.block_start = token
                 continue
 
@@ -132,7 +134,7 @@ class TemperatureController:
                 tool_id = token.param[0]
                 if tool_id != -1:
                     if tool_id != current_tool.tool_id:
-                        raise ToolChangeException("Tool id {tool_id} from TOOL_BLOCK_END doesn't match last active tool in layer".format(tool_id = tool_id))
+                        raise ToolChangeException(message = "Tool id {tool_id} from TOOL_BLOCK_END doesn't match last active tool in layer".format(tool_id = tool_id), tool_id = tool_id)
                     current_tool.block_end = token
                 continue
 
@@ -142,8 +144,7 @@ class TemperatureController:
             raise ConfException("TempController: Did not found TC_TEMP_SHUTDOWN parameter in the GCode, slicer has not been configured correctly...")
 
         t_end = time.time()
-        if conf.PERF_INFO:
-            print("TempController: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
+        logger.info("Analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
 
     # Prep tool layer intialization
     def gcode_prep_header(self):
@@ -161,8 +162,7 @@ class TemperatureController:
                 time_delta += token.runtime
                 token = token.next
 
-            if conf.DEBUG:
-                print("(DEBUG) TempController: INIT -> T{tool} - runtime estimate: {delta:0.2f}".format(tool = tool_id, delta = time_delta))
+            logger.debug("INIT -> T{tool} - runtime estimate: {delta:0.2f}".format(tool = tool_id, delta = time_delta))
 
             tool_temp = conf.tool_temperature(tool_info.tool_change.state_pre.layer_num, tool_id)
             # Check if should set idle temp or tool temp at INIT point
@@ -179,24 +179,22 @@ class TemperatureController:
                         break
                     inject_point = inject_point.prev
 
-                if conf.DEBUG:
-                    print("(DEBUG) TempController: Inject point for T{tool} is before \"{token}\" - time diff: {delta:0.2f}s".format(tool = tool_id, token = str(inject_point), delta = acc_time))
+                logger.debug("Inject point for T{tool} is before \"{token}\" - time diff: {delta:0.2f}s".format(tool = tool_id, token = str(inject_point), delta = acc_time))
 
                 # Insert idle temp in TC_INIT
                 # Insert ramp up at inject point
                 # Insert temp wait before tool change
-                gcode_init.append_node(gcode_analyzer.GCode('M104', {'S' : tool_temp - conf.temp_idle_delta, 'T' : tool_id}))
+                gcode_init.append_node(gcode_analyzer.GCode('G10', {'P' : tool_id, 'R' : tool_temp - conf.temp_idle_delta, }))
                 gcode_wait.append_node(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
-                inject_point.append_node(gcode_analyzer.GCode('M104', {'S' : tool_temp, 'T' : tool_id}))
+                inject_point.append_node(gcode_analyzer.GCode('G10', {'P' : tool_id, 'R' : tool_temp}))
                 tool_info.tool_change.append_node_left(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
             else:
-                if conf.DEBUG:
-                    print("(DEBUG) TempController: Inject point for T{tool} at TC_INIT".format(tool = tool_id))
+                logger.debug("Inject point for T{tool} at TC_INIT".format(tool = tool_id))
 
                 # Insert target temp at TC_INIT
                 # Insert temp wait at TC_INIT
-                gcode_init.append_node(gcode_analyzer.GCode('M104', {'S' : tool_temp, 'T' : tool_id}))
+                gcode_init.append_node(gcode_analyzer.GCode('G10', {'P' : tool_id, 'R' : tool_temp}))
                 gcode_wait.append_node(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
         # Inject code for bed temperature 
@@ -224,8 +222,7 @@ class TemperatureController:
                     time_delta += token.runtime
                     token = token.next
 
-                if conf.DEBUG:
-                    print("(DEBUG) TempController: T{tool} block_end -> T{tool} activation - runtime estimate: {delta:0.2f}s".format(tool = tool_id, delta = time_delta))
+                logger.debug("T{tool} block_end -> T{tool} activation - runtime estimate: {delta:0.2f}s".format(tool = tool_id, delta = time_delta))
 
                 # Get the temps
                 prev_temp = conf.tool_temperature(tool_prev_info.block_end.state_post.layer_num, tool_id)
@@ -264,8 +261,7 @@ class TemperatureController:
                     time_idling = time_delta - (time_cooling + time_heating)
 
                 # Statistics
-                if conf.DEBUG:
-                    print("(DEBUG) TempController: T{tool} {T_prev}C->{T_idle}C cooling time: {t_cooling:0.2f}s, idle time: {t_idling:0.2f}, {T_idle}C->{T_next}C heating time: {t_heating:0.2f}".format(
+                logger.debug("T{tool} {T_prev}C->{T_idle}C cooling time: {t_cooling:0.2f}s, idle time: {t_idling:0.2f}, {T_idle}C->{T_next}C heating time: {t_heating:0.2f}".format(
                         tool = tool_id, T_prev = prev_temp, T_next = next_temp, T_idle = idle_temp, t_cooling = time_cooling, t_idling = time_idling, t_heating = time_heating))
 
                 # Use the new heating time
@@ -279,13 +275,12 @@ class TemperatureController:
                             break
                         inject_point = inject_point.prev
 
-                    if conf.DEBUG:
-                        print("(DEBUG) TempController: Inject point for T{tool} temp ramp-up is before \"{token}\" - time diff: {delta:0.2f}s".format(
+                    logger.debug("Inject point for T{tool} temp ramp-up is before \"{token}\" - time diff: {delta:0.2f}s".format(
                             tool = tool_id, token = str(inject_point), delta = acc_time))
-                    inject_point.append_node(gcode_analyzer.GCode('M104', {'S' : next_temp, 'T' : tool_id}))
+                    inject_point.append_node(gcode_analyzer.GCode('G10', {'R' : next_temp, 'T' : tool_id}))
 
                 # Inject the idle temp
-                tool_prev_info.block_end.append_node(gcode_analyzer.GCode('M104', {'S' : idle_temp, 'T' : tool_id}))
+                tool_prev_info.block_end.append_node(gcode_analyzer.GCode('G10', {'R' : idle_temp, 'T' : tool_id}))
                 tool_next_info.tool_change.append_node_left(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
     # Prep tool deactivation
@@ -295,13 +290,14 @@ class TemperatureController:
             tool_info = activation_seq[-1]
 
             if tool_info.block_end is not None:
-                print("TempController: Disabling T{tool} at layer {layer}".format(
+                logger.info("Disabling T{tool} at layer {layer}".format(
                     tool = tool_id, layer = tool_info.block_end.state_post.layer_num))
 
-                tool_info.block_end.append_node(gcode_analyzer.GCode('M104', {'S' : 0, 'T' : tool_id}))
+                tool_info.block_end.append_node(gcode_analyzer.GCode('G10', {'R' : 0, 'T' : tool_id}))
 
         # Insert deactivation at the end
-        self.temp_footer.append_node(gcode_analyzer.GCode('M104', {'S' : 0}))
+        for tool_id in self.tool_activation_seq.keys():
+            self.temp_footer.append_node(gcode_analyzer.GCode('G10', {'R' : 0, 'T' : tool_id}))
         self.temp_footer.append_node(gcode_analyzer.GCode('M140', {'S' : 0}))
 
     # Set the bed temperatures 

@@ -8,6 +8,9 @@ from gcode_analyzer import Token, GCodeAnalyzer
 from tool_change_plan import ToolChangeException
 from conf import ConfException
 
+import logging
+logger = logging.getLogger(__name__)
+
 # Used to inject GCode for PCF control
 class PartCoolingFanController:
 
@@ -20,8 +23,7 @@ class PartCoolingFanController:
         t_start = time.time()
 
         # Generates the list of tool_activations per tool
-        if conf.DEBUG:
-            print("(DEBUG) PartFanController: Generating tool activation sequence per tool...")
+        logger.debug("PartFanController: Generating tool activation sequence per tool...")
 
         # Current tool head
         current_tool = None
@@ -36,8 +38,7 @@ class PartCoolingFanController:
                 continue
 
         t_end = time.time()
-        if conf.PERF_INFO:
-            print("PCF-Controller: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
+        logger.info("Analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
     
     # Inject the GCode
     def inject_gcode(self):

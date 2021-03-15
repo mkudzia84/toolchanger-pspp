@@ -1,11 +1,14 @@
-from tool_change_plan import LayerInfo, ToolChangeInfo
+from tool_change_plan import LayerInfo, ToolChangeInfo, ToolChangeException
 from gcode_analyzer import Token
 import tool_change_plan
 import gcode_analyzer
 import doublelinkedlist
 import conf
-import copy, math, time
+import copy, math, time, logging
 from collections import deque
+
+import logging
+logger = logging.getLogger(__name__)
 
 # Function to generate vertices for a circle 
 def circle_generate_vertices(cx, cy, radius, num_faces):
@@ -142,7 +145,7 @@ class PrimeTowerLayerInfo(LayerInfo):
                 previous_move = previous_move.prev
 
         if accumulated_dist < length:
-            print("Warning: Calculated wipe path {wipe_length:0.2f}[mm] less then configured {length:0.2f}[mm]".format(wipe_length = accumulated_dist, length = length))
+            logger.warn("Calculated wipe path {wipe_length:0.2f}[mm] less then configured {length:0.2f}[mm]".format(wipe_length = accumulated_dist, length = length))
 
 
         # Generate GCodes
@@ -152,7 +155,7 @@ class PrimeTowerLayerInfo(LayerInfo):
             for vertex in path:
                 to_retract = -retract_length * (vertex[2]) / accumulated_dist
                 gcode.append_node(gcode_analyzer.GCode('G1', {'X' : vertex[0], 'Y' : vertex[1], 'E' : to_retract}))
-            print("Calculated wipe path: {length}".format(length = accumulated_dist))
+            logger.info("Calculated wipe path: {length}".format(length = accumulated_dist))
         else:
             # Just add retraction
             gcode.append_node(gcode_analyzer.GCode('G1', {'E', -retract_length}))
@@ -263,7 +266,7 @@ class PrimeTowerLayerInfo(LayerInfo):
                         gcode.append_node(gcode_analyzer.GCode('G1', { 'X' : inject_state.x, 'Y' : inject_state.y }))
                     gcode.append_node(gcode_analyzer.GCode('G1', { 'F' : inject_state.feed_rate}))
                 else:
-                    print("Warning : X/Y position state not present, if this error apears more then once the GCode is malformed")
+                    logger.warn("X/Y position state not present, if this error apears more then once the GCode is malformed")
 
                 # Retract before 
                 # - if  tool was unretracted before entry point - unretract after the move
@@ -304,8 +307,7 @@ class PrimeTowerLayerInfo(LayerInfo):
 
         # Check if we need to continue constructing the tower
         if len(self.tools_active) == 1 and len(self.tools_idle) == 0:
-            if conf.DEBUG:
-                print("(DEBUG) One tool ACTIVE and no more IDLE tools - can stop generating prime tower")
+            logger.debug("One tool ACTIVE and no more IDLE tools - can stop generating prime tower")
             return 
 
         tool_indx = 0
@@ -328,15 +330,13 @@ class PrimeTowerLayerInfo(LayerInfo):
 
             # Generate BAND
             gcode_band = self.gcode_pillar_band(tool_id = tool_change.tool_id)
-            if conf.DEBUG:
-                print("(DEBUG) Generated prime tower band for layer #{layer_num} for T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
+            logger.debug("Generated prime tower band for layer #{layer_num} for T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
 
             gcode_idle = None
             if not filled_idle_gaps and len(self.tools_idle) != 0:
                 gcode_idle = self.gcode_pillar_idle_tool_bands(tool_change.tool_id)
                 filled_idle_gaps = True
-                if conf.DEBUG:
-                    print("(DEBUG) Generated prime tower idle tools infill for layer #{layer_num} with T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
+                logger.debug("Generated prime tower idle tools infill for layer #{layer_num} with T{tool}".format(layer_num = self.layer_num, tool = tool_change.tool_id))
 
             # Finally inject 
             gcode = gcode_band
@@ -358,8 +358,7 @@ class PrimeTowerLayerInfo(LayerInfo):
             gcode.head.append_node_left(gcode_analyzer.Comment("prime-tower layer #{layer_num}".format(layer_num = self.layer_num)))
 
             inject_point.append_nodes_right(gcode)
-            if conf.DEBUG:
-                print("(DEBUG) Generated prime tower band for layer #{layer} for T{tool}".format(layer = self.layer_num, tool = tool_change.tool_id))
+            logger.debug("(DEBUG) Generated prime tower band for layer #{layer} for T{tool}".format(layer = self.layer_num, tool = tool_change.tool_id))
 
             tool_indx += 1
 
@@ -369,8 +368,9 @@ class PrimeTowerLayerInfo(LayerInfo):
 class PrimeTower:
 
     def __init__(self, layers = None):
-        if layers is not None:
-            self.generate_layers(layers)
+        pass
+        #if layers is not None:
+        #    self.generate_layers(layers)
        
     # Generate bands for a layer/tool
     def generate_pillar_bands(self):
@@ -437,7 +437,6 @@ class PrimeTower:
         # Analyse which tools are disabled (temp = 0) or idle (on standby) per layer
         for layer_info in reversed(self.layers):
             next_layer = layer_info.layer_num + 1
-            prev_layer = layer_info.layer_num - 1
             
             if next_layer == len(self.layers):
                 # If it's the last layer 
@@ -489,13 +488,11 @@ class PrimeTower:
 
             # Check if BEFORE_LAYER_CHANGE label
             if token.type == Token.PARAMS and token.label == 'BEFORE_LAYER_CHANGE':
-                next_layer, next_layer_z = token.param[0], token.param[1]
                 # Mark the last layer end as the token before BEFORE_LAYER_CHANGE
                 layer_info.layer_end = token
 
                 # Validate the height
                 toolset = [tool_change_info.tool_id for tool_change_info in layer_info.tools_sequence]
-                toolset_min_layer_height = conf.min_layer_height(toolset)
                 toolset_max_layer_height = conf.max_layer_height(toolset)
 
                 # Layer height higher then max for the toolset (shouldn't happen!)
@@ -510,8 +507,7 @@ class PrimeTower:
             if token.type == Token.TOOLCHANGE:
                 if token.next_tool != -1:
                     current_tool = ToolChangeInfo(tool_change = token)
-                    if conf.DEBUG:
-                        print("(DEBUG) PrimeTower - Added tool T{tool_id} to layer #{layer_num}".format(tool_id = token.next_tool, layer_num = self.layers[-1].layer_num))
+                    logger.debug("PrimeTower - Added tool T{tool_id} to layer #{layer_num}".format(tool_id = token.next_tool, layer_num = self.layers[-1].layer_num))
 
                     layer_info.tool_change_seq.append(current_tool)
                     layer_info.tools_sequence.append(current_tool)
@@ -522,7 +518,7 @@ class PrimeTower:
                 tool_id = token.param[0]
                 if tool_id != -1:
                     if tool_id != current_tool.tool_id:
-                        raise ToolChangeException("Tool id {tool_id} from TOOL_BLOCK_START doesn't match last active tool in layer".format(tool_id = tool_id))
+                        raise ToolChangeException(message = "Tool id {tool_id} from TOOL_BLOCK_START doesn't match last active tool in layer".format(tool_id = tool_id), tool_id = tool_id)
                     current_tool.block_start = token
                 continue
 
@@ -531,7 +527,7 @@ class PrimeTower:
                 tool_id = token.param[0]
                 if tool_id != -1:
                     if tool_id != current_tool.tool_id:
-                        raise ToolChangeException("Tool id {tool_id} from TOOL_BLOCK_END doesn't match last active tool in layer".format(tool_id = tool_id))
+                        raise ToolChangeException(message = "Tool id {tool_id} from TOOL_BLOCK_END doesn't match last active tool in layer".format(tool_id = tool_id), tool_id = tool_id)
                     current_tool.block_end = token
                 continue
             
@@ -544,8 +540,7 @@ class PrimeTower:
         self.generate_pillar_bands()
 
         t_end = time.time()
-        if conf.PERF_INFO:
-            print("PrimeTower: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
+        logger.info("PrimeTower: analysis done [elapsed: {elapsed:0.2f}s]".format(elapsed = t_end - t_start))
 
         return True
 
@@ -597,15 +592,15 @@ class PrimeTower:
                     optimized_layers[optimized_layer_indx].layer_height = round(optimized_layer_height, 2)
                     optimized_layers[optimized_layer_indx].layer_end = layer_info.layer_end
 
-                    if conf.DEBUG:
-                        print("(DEBUG) optimized layer height : {height:0.2f} within [{min:0.2f},{max:0.2f}] for tools active [{tools}]".format(
+                    
+                    logger.debug("Optimized layer height : {height:0.2f} within [{min:0.2f},{max:0.2f}] for tools active [{tools}]".format(
                             height = optimized_layer_height, 
                             min = min_layer_height, 
                             max = max_layer_height,
                             tools = ','.join([str(tool.tool_id) for tool in optimized_layers[optimized_layer_indx].tools_sequence])))
-                        print("(DEBUG) Prime tower layer #{layer_num} can be combined with previous layer, squashing...".format(layer_num = layer_info.layer_num))
-                        print("(DEBUG) >> prev layer tools active : {seq}".format(seq = [str(tool) for tool in prev_layer_tool_seq]))
-                        print("(DEBUG) >> next layer tools active : {seq}".format(seq = [str(tool) for tool in next_layer_tool_seq]))
+                    logger.debug("Prime tower layer #{layer_num} can be combined with previous layer, squashing...".format(layer_num = layer_info.layer_num))
+                    logger.debug(" >> prev layer tools active : {seq}".format(seq = [str(tool) for tool in prev_layer_tool_seq]))
+                    logger.debug(" >> next layer tools active : {seq}".format(seq = [str(tool) for tool in next_layer_tool_seq]))
 
                     continue
 
@@ -640,6 +635,6 @@ class PrimeTower:
                 num_layers_by_height[layer.layer_height] += 1
 
         # Print info
-        print("Prime Tower Info :")
-        print(" - num layers : {layers_num}".format(layers_num = len(self.layers)))
+        logger.info("Prime Tower Info :")
+        logger.info(" - num layers : {layers_num}".format(layers_num = len(self.layers)))
         

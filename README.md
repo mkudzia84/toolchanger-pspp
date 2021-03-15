@@ -5,7 +5,7 @@ This is a post processing script for PrusaSlicer for tool-changing/IDEX multu-ex
 using the RepRap3 firmware 
 
 It has been tested on:
-PrusaSlicer 2.2
+PrusaSlicer 2.3
 E3D toolchanger with Duet 3 board running RR3.01RC4 firmware with 4 tools
 E3D toolchanger with Duet 2 Wifi board running RR3.1.1 firmware with 3 and 4 tools
 
@@ -17,10 +17,17 @@ The script includes the following enhancements:
 
 ##### Change Log
 
+###### 14/03/2020
+- Tested compatibility with Prusa Slicer 2.3
+- Added compatibility with the new RepRapFirmware G-code flavour in PrusaSlicer 2.3, Supported flavours now are RepRapFirmware and RepRap/Sprinter
+- Fixed faulty extrusion formula for the Prime Tower generation
+- Replaced the M104 gcode (deprecated) generation with the G10
+- Fixed the firmware G10 retraction detection to work properly when using G10 commands for temperature setup
+
 ###### 11/03/2021
-- Added a configuration for the prime towers extrusion width
-- Changed the formula which calculates E for the prime tower
-- Inverted the influence of the tool_extrusion_multiplier
+- Added a configuration for the prime towers extrusion width (Nibbels)
+- Changed the formula which calculates E for the prime tower (Nibbels)
+- Inverted the influence of the tool_extrusion_multiplier (Nibbels)
 
 ###### 05/09/2020
 - Added heated bed temperature control.
