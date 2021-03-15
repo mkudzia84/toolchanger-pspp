@@ -176,7 +176,7 @@ class GCodeAnalyzer:
             if self.feed_rate is not None:
                 return min(self.feed_rate, conf.printer_extruder_speed[self.tool_selected])
             else:
-                return conf.extruder_speed[self.tool_selected]
+                return conf.printer_extruder_speed[self.tool_selected]
 
         # Is tool retracted
         @property 
