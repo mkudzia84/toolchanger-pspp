@@ -277,10 +277,10 @@ class TemperatureController:
 
                     logger.debug("Inject point for T{tool} temp ramp-up is before \"{token}\" - time diff: {delta:0.2f}s".format(
                             tool = tool_id, token = str(inject_point), delta = acc_time))
-                    inject_point.append_node(gcode_analyzer.GCode('G10', {'R' : next_temp, 'T' : tool_id}))
+                    inject_point.append_node(gcode_analyzer.GCode('G10', {'R' : next_temp, 'P' : tool_id}))
 
                 # Inject the idle temp
-                tool_prev_info.block_end.append_node(gcode_analyzer.GCode('G10', {'R' : idle_temp, 'T' : tool_id}))
+                tool_prev_info.block_end.append_node(gcode_analyzer.GCode('G10', {'R' : idle_temp, 'P' : tool_id}))
                 tool_next_info.tool_change.append_node_left(gcode_analyzer.GCode('M116', {'P' : tool_id, 'S' : 5}))
 
     # Prep tool deactivation
